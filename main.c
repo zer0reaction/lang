@@ -8,15 +8,13 @@
 #define ARENA_IMPLEMENTATION
 #include "arena.h"
 
-/* = a 5 */
-
 typedef enum{
   TT_EMPTY = 0,
   TT_IDENTIFIER,
   TT_INTEGER,
   TT_EQUAL,
   TT_PLUS,
-  TT_COUNT // TODO: no checks
+  TT_COUNT
 }tt_t;
 
 typedef struct{
@@ -35,15 +33,15 @@ typedef enum{
   NT_VARIABLE,
   NT_INTEGER,
   NT_SUM,
-  NT_COUNT // TODO: no checks
+  NT_COUNT
 }nt_t;
 
 typedef struct node_t node_t;
 struct node_t{
   nt_t type;
   int id;
-  node_t *arg1;
-  node_t *arg2;
+  node_t *lval;
+  node_t *rval;
 };
 
 static symbol_t *table = NULL;
@@ -182,8 +180,8 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
       node_t *n = arena_alloc(a, sizeof(*n));
       n->type = NT_ASSIGNMENT;
       *eaten += 1;
-      n->arg1 = parse(ts, eaten, a);
-      n->arg2 = parse(ts, eaten, a);
+      n->lval = parse(ts, eaten, a);
+      n->rval = parse(ts, eaten, a);
       return n;
     } break;
 
@@ -191,8 +189,8 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
       node_t *n = arena_alloc(a, sizeof(*n));
       n->type = NT_SUM;
       *eaten += 1;
-      n->arg1 = parse(ts, eaten, a);
-      n->arg2 = parse(ts, eaten, a);
+      n->lval = parse(ts, eaten, a);
+      n->rval = parse(ts, eaten, a);
       return n;
     } break;
 
@@ -217,17 +215,17 @@ void print_ast(node_t *n)
 
     case NT_ASSIGNMENT: {
       printf("(= ");
-      print_ast(n->arg1);
+      print_ast(n->lval);
       printf(" ");
-      print_ast(n->arg2);
+      print_ast(n->rval);
       printf(")");
     } break;
 
     case NT_SUM: {
       printf("(+ ");
-      print_ast(n->arg1);
+      print_ast(n->lval);
       printf(" ");
-      print_ast(n->arg2);
+      print_ast(n->rval);
       printf(")");
     } break;
 
@@ -237,17 +235,30 @@ void print_ast(node_t *n)
   }
 }
 
+/*
+
+- check if the variable is defined (symbol type maybe?)
+  pass assign id and compare (if less, then ok)
+
+- create IR (array of structs with register names, variable names, literals)
+  left side (arg1) first (because of allocation)
+
+- semantic analysis
+
+*/
+
 int main(void)
 {
-  char *s = "= a + = b 32 35";
+  char *s = "= a + 5 10";
 
   token_t *ts = tokenize(s, strlen(s));
-  print_tokens(ts);
+  // print_tokens(ts);
 
   Arena a = {0};
   int eaten = 0;
   node_t *root = parse(ts, &eaten, &a);
   print_ast(root);
+  printf("\n");
 
   arena_free(&a);
   arrfree(ts);
