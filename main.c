@@ -25,6 +25,7 @@ typedef struct{
 typedef union{
   char identifier_name;
   int integer_value;
+  int stack_offset;
 }symbol_t;
 
 typedef enum{
@@ -44,7 +45,26 @@ struct node_t{
   node_t *rval;
 };
 
+typedef enum{
+  ST_NONE,
+  ST_REGISTER,
+  ST_STACK
+}st_t;
+
+typedef struct{
+  st_t type;
+  union {
+    int register_id;
+    int stack_offset;
+  };
+}storage_t;
+
 static symbol_t *table = NULL;
+
+static char *registers[] = {
+  "eax", "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d"
+};
+#define REGISTERS_COUNT (sizeof(registers) / sizeof(*registers))
 
 token_t *tokenize(char *s, int len)
 {
@@ -237,31 +257,176 @@ void print_ast(node_t *n)
 
 /*
 
-- check if the variable is defined (symbol type maybe?)
-  pass assign id and compare (if less, then ok)
+- check if the variable is defined (context_variable_ids array)
 
 - create IR (array of structs with register names, variable names, literals)
   left side (arg1) first (because of allocation)
+  add variable's offset to symbol table
 
 - semantic analysis
 
 */
 
-int main(void)
+storage_t codegen(node_t *n, int *registers_used, int *stack_offset) {
+  switch (n->type) {
+    // stack
+    case NT_VARIABLE: {
+      // TODO: check if variable exists, currently only creates new variable
+      int variable_offset = (*stack_offset -= 4);
+      table[n->id].stack_offset = variable_offset;
+      return (storage_t){ .type = ST_STACK, .stack_offset = variable_offset };
+    } break;
+
+    // register
+    case NT_INTEGER: {
+      assert(*registers_used < (int)REGISTERS_COUNT);
+
+      int register_id = (*registers_used)++;
+      int value = table[n->id].integer_value;
+
+      printf("\tmovl\t$%d, %%%s\n", value, registers[register_id]);
+      return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+    } break;
+
+    // none
+    case NT_ASSIGNMENT: {
+      storage_t lval = codegen(n->lval, registers_used, stack_offset);
+      storage_t rval = codegen(n->rval, registers_used, stack_offset);
+
+      assert(lval.type != ST_NONE && rval.type != ST_NONE);
+
+      // movl rval, lval
+
+      printf("\tmovl\t");
+
+      switch (rval.type) {
+        case ST_STACK: {
+          printf("%d(%%rbp)", rval.stack_offset);
+        } break;
+
+        case ST_REGISTER: {
+          printf("%%%s", registers[rval.register_id]);
+        } break;
+
+        default: {
+          assert(0 && "unexpected storage type");
+        } break;
+      }
+
+      printf(", ");
+
+      switch (lval.type) {
+        case ST_STACK: {
+          printf("%d(%%rbp)", lval.stack_offset);
+        } break;
+
+        case ST_REGISTER: {
+          printf("%%%s", registers[lval.register_id]);
+        } break;
+
+        default: {
+          assert(0 && "unexpected storage type");
+        } break;
+      }
+
+      printf("\n");
+
+      return (storage_t){ .type = ST_NONE };
+    } break;
+
+    // register
+    case NT_SUM: {
+      storage_t lval = codegen(n->lval, registers_used, stack_offset);
+      storage_t rval = codegen(n->rval, registers_used, stack_offset);
+      assert(lval.type != ST_NONE && rval.type != ST_NONE);
+
+      assert(*registers_used < (int)REGISTERS_COUNT);
+      int register_id = (*registers_used)++;
+
+      // movl lval, %reg
+      // addl rval, %reg
+
+      printf("\tmovl\t");
+
+      switch (lval.type) {
+        case ST_STACK: {
+          printf("%d(%%rbp)", lval.stack_offset);
+        } break;
+
+        case ST_REGISTER: {
+          printf("%%%s", registers[lval.register_id]);
+        } break;
+
+        default: {
+          assert(0 && "unexpected storage type");
+        } break;
+      }
+
+      printf(", %%%s\n", registers[register_id]);
+      printf("\taddl\t");
+
+      switch (rval.type) {
+        case ST_STACK: {
+          printf("%d(%%rbp)", rval.stack_offset);
+        } break;
+
+        case ST_REGISTER: {
+          printf("%%%s", registers[rval.register_id]);
+        } break;
+
+        default: {
+          assert(0 && "unexpected storage type");
+        } break;
+      }
+
+      printf(", %%%s\n", registers[register_id]);
+
+      return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+    } break;
+
+    default: {
+      assert(0 && "unexpected node");
+    } break;
+  }
+}
+
+int main(int argc, char *argv[])
 {
-  char *s = "= a + 5 10";
+  if (argc != 2) {
+    printf("incorrect number of arguments\n");
+    return 1;
+  }
+
+  char *s = argv[1];
 
   token_t *ts = tokenize(s, strlen(s));
-  // print_tokens(ts);
 
   Arena a = {0};
   int eaten = 0;
-  node_t *root = parse(ts, &eaten, &a);
-  print_ast(root);
-  printf("\n");
+  node_t **ns = NULL;
+
+  while (eaten < arrlen(ts)) {
+    node_t *n = parse(ts, &eaten, &a);
+    arrput(ns, n);
+  }
+
+  /*
+  for (int i = 0; i < arrlen(ns); i++) {
+    print_ast(ns[i]);
+    printf("\n");
+  }
+  */
+
+  int registers_used = 0;
+  int stack_offset = 0;
+  for (int i = 0; i < arrlen(ns); i++) {
+    registers_used = 0;
+    codegen(ns[i], &registers_used, &stack_offset);
+  }
 
   arena_free(&a);
   arrfree(ts);
+  arrfree(ns);
   arrfree(table);
   return 0;
 }
