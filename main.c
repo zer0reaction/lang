@@ -75,14 +75,16 @@ struct node_t{
 typedef enum{
   ST_NONE,
   ST_REGISTER,
-  ST_STACK
+  ST_STACK,
+  ST_IMMEDIATE
 }st_t;
 
 typedef struct{
   st_t type;
-  union {
+  union {                 // TODO: just pass id?
     int register_id;
     int stack_offset;
+    int immediate_value;
   };
 }storage_t;
 
@@ -345,11 +347,15 @@ void unwrap_storage(storage_t st)
 {
   switch (st.type) {
     case ST_STACK: {
-      printf("%d(%%rbp)", st.stack_offset);
+      printf("%d(%%rbp)", st.stack_offset); // TODO isn't it held in the table?
     } break;
 
     case ST_REGISTER: {
       printf("%%%s", scratch_registers[st.register_id]);
+    } break;
+
+    case ST_IMMEDIATE: {
+      printf("$%d", st.immediate_value);
     } break;
 
     default: {
@@ -380,13 +386,8 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
 
     // register
     case NT_INTEGER: {
-      assert(*registers_used < (int)REGISTERS_COUNT);
-
-      int register_id = (*registers_used)++;
       int value = table[n->id].integer_value;
-
-      printf("\tmovl\t$%d, %%%s\n", value, scratch_registers[register_id]);
-      return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+      return (storage_t){ .type = ST_IMMEDIATE, .immediate_value = value };
     } break;
 
     // none
