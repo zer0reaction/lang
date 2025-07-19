@@ -27,6 +27,7 @@ typedef enum{
   TT_INTEGER,
   TT_EQUAL,
   TT_PLUS,
+  TT_MINUS,
   TT_ROUND_OPEN,
   TT_ROUND_CLOSE,
   TT_COUNT
@@ -52,6 +53,7 @@ typedef enum{
   NT_FUNCTION_CALL,
   NT_INTEGER,
   NT_SUM,
+  NT_SUBTRACTION,
   NT_COUNT
 }nt_t;
 
@@ -93,7 +95,7 @@ token_t *tokenize(char *s, int len)
   int i = 0;
   token_t *ts = NULL;
 
-  assert(TT_COUNT == 7);
+  assert(TT_COUNT == 8);
 
   while (i < len) {
     switch (s[i]) {
@@ -113,6 +115,13 @@ token_t *tokenize(char *s, int len)
       case '+': {
         token_t t = {0};
         t.type = TT_PLUS;
+        arrput(ts, t);
+        i += 1;
+      } break;
+
+      case '-': {
+        token_t t = {0};
+        t.type = TT_MINUS;
         arrput(ts, t);
         i += 1;
       } break;
@@ -229,8 +238,8 @@ void print_tokens(token_t *ts)
 
 node_t *parse(token_t *ts, int *eaten, Arena *a)
 {
-  assert(TT_COUNT == 7);
-  assert(NT_COUNT == 6);
+  assert(TT_COUNT == 8);
+  assert(NT_COUNT == 7);
 
   assert(*eaten < arrlen(ts));
 
@@ -276,6 +285,13 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
 
     case TT_PLUS: {
       n->type = NT_SUM;
+      *eaten += 1;
+      n->lval = parse(ts, eaten, a);
+      n->rval = parse(ts, eaten, a);
+    } break;
+
+    case TT_MINUS: {
+      n->type = NT_SUBTRACTION;
       *eaten += 1;
       n->lval = parse(ts, eaten, a);
       n->rval = parse(ts, eaten, a);
@@ -355,7 +371,7 @@ void unwrap_storage(storage_t st)
 
 storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
 {
-  assert(NT_COUNT == 6);
+  assert(NT_COUNT == 7);
 
   switch (n->type) {
     case NT_VARIABLE: {
@@ -400,6 +416,26 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       unwrap_storage(lval);
       printf(", %%%s\n", scratch_registers[register_id]);
       printf("\taddl\t");
+      unwrap_storage(rval);
+      printf(", %%%s\n", scratch_registers[register_id]);
+
+      return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+    } break;
+
+    case NT_SUBTRACTION: {
+      storage_t lval = codegen(n->lval, registers_used, stack_offset);
+      storage_t rval = codegen(n->rval, registers_used, stack_offset);
+      assert(lval.type != ST_NONE && rval.type != ST_NONE);
+
+      assert(*registers_used < (int)REGISTERS_COUNT);
+      int register_id = (*registers_used)++;
+
+      // movl lval, %reg
+      // subl rval, %reg
+      printf("\tmovl\t");
+      unwrap_storage(lval);
+      printf(", %%%s\n", scratch_registers[register_id]);
+      printf("\tsubl\t");
       unwrap_storage(rval);
       printf(", %%%s\n", scratch_registers[register_id]);
 
