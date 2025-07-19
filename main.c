@@ -397,11 +397,24 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  char *s = argv[1];
+  Arena a = {0};
+
+  FILE *fp = fopen(argv[1], "r");
+  if (!fp) {
+    printf("can't open file %s\n", argv[1]);
+    return 1;
+  }
+
+  fseek(fp, 0, SEEK_END);
+  size_t file_size = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+
+  char *s = arena_alloc(&a, sizeof(*s) * (file_size + 1));
+  fread(s, 1, file_size, fp);
+  s[file_size] = '\0';
 
   token_t *ts = tokenize(s, strlen(s));
 
-  Arena a = {0};
   int eaten = 0;
   node_t **ns = NULL;
 
@@ -417,12 +430,24 @@ int main(int argc, char *argv[])
   }
   */
 
+  printf(".section .text\n");
+  printf(".globl _start\n");
+  printf("\n");
+  printf("_start:\n");
+  printf("\tmovq\t%%rsp, %%rbp\n");
+  printf("\n");
+
   int registers_used = 0;
   int stack_offset = 0;
   for (int i = 0; i < arrlen(ns); i++) {
     registers_used = 0;
     codegen(ns[i], &registers_used, &stack_offset);
   }
+
+  printf("\n");
+  printf("\tmovq\t$60, %%rax\n");
+  printf("\tmovq\t$0, %%rdi\n");
+  printf("\tsyscall\n");
 
   arena_free(&a);
   arrfree(ts);
