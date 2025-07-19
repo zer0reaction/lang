@@ -57,8 +57,8 @@ typedef enum{
 
 typedef struct node_t node_t;
 struct node_t{
-  nt_t type;
   int id;
+  nt_t type;
 
   union {
     struct {
@@ -80,12 +80,10 @@ typedef enum{
 }st_t;
 
 typedef struct{
+  int id;
   st_t type;
-  union {                 // TODO: just pass id?
-    int register_id;
-    int stack_offset;
-    int immediate_value;
-  };
+
+  int register_id;
 }storage_t;
 
 static symbol_t *table = NULL;
@@ -236,20 +234,17 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
 
   assert(*eaten < arrlen(ts));
 
+  node_t *n = arena_alloc(a, sizeof(*n));
+  memset(n, 0, sizeof(*n));
+
   switch (ts[*eaten].type) {
     case TT_INTEGER: {
-      node_t *n = arena_alloc(a, sizeof(*n));
-      memset(n, 0, sizeof(*n));
       n->type = NT_INTEGER;
       n->id = ts[*eaten].id;
       *eaten += 1;
-      return n;
     } break;
 
     case TT_IDENTIFIER: {
-      node_t *n = arena_alloc(a, sizeof(*n));
-      memset(n, 0, sizeof(*n));
-
       if (arrlen(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
         n->type = NT_FUNCTION_CALL;
         n->id = ts[*eaten].id;
@@ -270,34 +265,28 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         n->id = ts[*eaten].id;
         *eaten += 1;
       }
-
-      return n;
     } break;
 
     case TT_EQUAL: {
-      node_t *n = arena_alloc(a, sizeof(*n));
-      memset(n, 0, sizeof(*n));
       n->type = NT_ASSIGNMENT;
       *eaten += 1;
       n->lval = parse(ts, eaten, a);
       n->rval = parse(ts, eaten, a);
-      return n;
     } break;
 
     case TT_PLUS: {
-      node_t *n = arena_alloc(a, sizeof(*n));
-      memset(n, 0, sizeof(*n));
       n->type = NT_SUM;
       *eaten += 1;
       n->lval = parse(ts, eaten, a);
       n->rval = parse(ts, eaten, a);
-      return n;
     } break;
 
     default: {
       assert(0 && "unknown token");
     } break;
   }
+
+  return n;
 }
 
 void print_ast(node_t *n)
@@ -347,7 +336,7 @@ void unwrap_storage(storage_t st)
 {
   switch (st.type) {
     case ST_STACK: {
-      printf("%d(%%rbp)", st.stack_offset); // TODO isn't it held in the table?
+      printf("%d(%%rbp)", table[st.id].stack_offset);
     } break;
 
     case ST_REGISTER: {
@@ -355,7 +344,7 @@ void unwrap_storage(storage_t st)
     } break;
 
     case ST_IMMEDIATE: {
-      printf("$%d", st.immediate_value);
+      printf("$%d", table[st.id].integer_value);
     } break;
 
     default: {
@@ -369,28 +358,18 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
   assert(NT_COUNT == 6);
 
   switch (n->type) {
-    // stack
     case NT_VARIABLE: {
-      int variable_offset = 0;
-
-      if (table[n->id].visibility) {
-        variable_offset = table[n->id].stack_offset;
-      } else {
-        variable_offset = (*stack_offset -= 4);
-        table[n->id].stack_offset = variable_offset;
+      if (!table[n->id].visibility) {
+        table[n->id].stack_offset = (*stack_offset -= 4);
         table[n->id].visibility = true;
       }
-
-      return (storage_t){ .type = ST_STACK, .stack_offset = variable_offset };
+      return (storage_t){ .id = n->id, .type = ST_STACK };
     } break;
 
-    // register
     case NT_INTEGER: {
-      int value = table[n->id].integer_value;
-      return (storage_t){ .type = ST_IMMEDIATE, .immediate_value = value };
+      return (storage_t){ .id = n->id, .type = ST_IMMEDIATE };
     } break;
 
-    // none
     case NT_ASSIGNMENT: {
       storage_t lval = codegen(n->lval, registers_used, stack_offset);
       storage_t rval = codegen(n->rval, registers_used, stack_offset);
@@ -407,7 +386,6 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       return (storage_t){ .type = ST_NONE };
     } break;
 
-    // register
     case NT_SUM: {
       storage_t lval = codegen(n->lval, registers_used, stack_offset);
       storage_t rval = codegen(n->rval, registers_used, stack_offset);
@@ -428,7 +406,6 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
     } break;
 
-    // none
     case NT_FUNCTION_CALL: {
       int storage_count = n->args_count;
 
@@ -443,13 +420,10 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       }
 
       int allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
-
       if (allign_offset != 0) {
         printf("\tsubq\t$%d, %%rsp\n", allign_offset);
       }
-
       printf("\tcall\t%c\n", table[n->id].identifier_name);
-
       if (allign_offset != 0) {
         printf("\taddq\t$%d, %%rsp\n", allign_offset);
       }
