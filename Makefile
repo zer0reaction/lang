@@ -10,3 +10,7 @@ test: main test.lang
 	./main test.lang > .build/test.s
 	as -o .build/test.o .build/test.s
 	ld -o test .build/test.o
+
+assemble: .build/test.s
+	as -o .build/test.o .build/test.s
+	ld -o test .build/test.o
