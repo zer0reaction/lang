@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <assert.h>
 
@@ -36,10 +37,12 @@ typedef struct{
   int id;
 }token_t;
 
-typedef union{
+typedef struct{
   char identifier_name;
-  int integer_value;
+  bool visibility;
   int stack_offset;
+
+  int integer_value;
 }symbol_t;
 
 typedef enum{
@@ -160,11 +163,22 @@ token_t *tokenize(char *s, int len)
         token_t t = {0};
         t.type = TT_IDENTIFIER;
 
-        symbol_t sym = {0};
-        sym.identifier_name = s[i];
-        arrput(table, sym);
+        // TODO: rewrite this hack
+        bool found = false;
+        for (int j = 0; j < arrlen(table); j++) {
+          if (table[j].identifier_name == s[i]) {
+            found = true;
+            t.id = j;
+            break;
+          }
+        }
 
-        t.id = arrlen(table) - 1;
+        if (!found) {
+          symbol_t sym = {0};
+          sym.identifier_name = s[i];
+          arrput(table, sym);
+          t.id = arrlen(table) - 1;
+        }
 
         arrput(ts, t);
         i += 1;
@@ -327,18 +341,6 @@ void print_ast(node_t *n)
   }
 }
 
-/*
-
-- check if the variable is defined (context_variable_ids array)
-
-- create IR (array of structs with register names, variable names, literals)
-  left side (arg1) first (because of allocation)
-  add variable's offset to symbol table
-
-- semantic analysis
-
-*/
-
 void unwrap_storage(storage_t st)
 {
   switch (st.type) {
@@ -363,9 +365,16 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
   switch (n->type) {
     // stack
     case NT_VARIABLE: {
-      // TODO: check if variable exists, currently only creates new variable
-      int variable_offset = (*stack_offset -= 4);
-      table[n->id].stack_offset = variable_offset;
+      int variable_offset = 0;
+
+      if (table[n->id].visibility) {
+        variable_offset = table[n->id].stack_offset;
+      } else {
+        variable_offset = (*stack_offset -= 4);
+        table[n->id].stack_offset = variable_offset;
+        table[n->id].visibility = true;
+      }
+
       return (storage_t){ .type = ST_STACK, .stack_offset = variable_offset };
     } break;
 
@@ -426,23 +435,23 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
         storage_t st = codegen(n->args[i], registers_used, stack_offset);
         assert(st.type != ST_NONE);
 
-        int allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
-
-        if (allign_offset != 0) {
-          printf("\tsubq\t$%d, %%rsp\n", allign_offset);
-        }
-
         // movl arg, reg
         printf("\tmovl\t");
         unwrap_storage(st);
         printf(", %%%s\n", argument_registers[i]);
+      }
 
-        if (allign_offset != 0) {
-          printf("\taddq\t$%d, %%rsp\n", allign_offset);
-        }
+      int allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+
+      if (allign_offset != 0) {
+        printf("\tsubq\t$%d, %%rsp\n", allign_offset);
       }
 
       printf("\tcall\t%c\n", table[n->id].identifier_name);
+
+      if (allign_offset != 0) {
+        printf("\taddq\t$%d, %%rsp\n", allign_offset);
+      }
 
       return (storage_t){ .type = ST_NONE };
     } break;
