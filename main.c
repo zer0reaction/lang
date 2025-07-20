@@ -61,6 +61,7 @@ typedef struct node_t node_t;
 struct node_t{
   int id;
   nt_t type;
+  node_t *next;
 
   union {
     struct {
@@ -307,7 +308,9 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
 
 void print_ast(node_t *n)
 {
-  assert(NT_COUNT == 6);
+  assert(NT_COUNT == 7);
+
+  if (n == NULL) return;
 
   switch (n->type) {
     case NT_INTEGER: {
@@ -334,6 +337,14 @@ void print_ast(node_t *n)
       printf(")");
     } break;
 
+    case NT_SUBTRACTION: {
+      printf("(- ");
+      print_ast(n->lval);
+      printf(" ");
+      print_ast(n->rval);
+      printf(")");
+    } break;
+
     case NT_FUNCTION_CALL: {
       printf("%c(", table[n->id].identifier_name);
       for (int i = 0; i < n->args_count; i++) {
@@ -346,6 +357,8 @@ void print_ast(node_t *n)
       assert(0 && "unexpected node");
     } break;
   }
+
+  print_ast(n->next);
 }
 
 void unwrap_storage(storage_t st)
@@ -499,19 +512,23 @@ int main(int argc, char *argv[])
   token_t *ts = tokenize(s, strlen(s));
 
   int eaten = 0;
-  node_t **ns = NULL;
+  node_t *root = NULL;
+  node_t *current = NULL;
 
   while (eaten < arrlen(ts)) {
-    node_t *n = parse(ts, &eaten, &a);
-    arrput(ns, n);
+    if (!root) {
+      root = parse(ts, &eaten, &a);
+      current = root;
+    } else {
+      current->next = parse(ts, &eaten, &a);
+      current = current->next;
+    }
   }
 
-/*
-  for (int i = 0; i < arrlen(ns); i++) {
-    print_ast(ns[i]);
-    printf("\n");
-  }
-*/
+  /*
+  print_ast(root);
+  printf("\n");
+  */
 
   printf(".section .text\n");
   printf(".globl _start\n");
@@ -538,9 +555,12 @@ int main(int argc, char *argv[])
 
   int registers_used = 0;
   int stack_offset = 0;
-  for (int i = 0; i < arrlen(ns); i++) {
+  current = root;
+
+  while (current) {
     registers_used = 0;
-    codegen(ns[i], &registers_used, &stack_offset);
+    codegen(current, &registers_used, &stack_offset);
+    current = current->next;
   }
 
   printf("\n");
@@ -550,7 +570,6 @@ int main(int argc, char *argv[])
 
   arena_free(&a);
   arrfree(ts);
-  arrfree(ns);
   arrfree(table);
   return 0;
 }
