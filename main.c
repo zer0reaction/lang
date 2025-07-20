@@ -402,17 +402,32 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
     case NT_ASSIGNMENT: {
       storage_t lval = codegen(n->lval, registers_used, stack_offset);
       storage_t rval = codegen(n->rval, registers_used, stack_offset);
-
       assert(lval.type != ST_NONE && rval.type != ST_NONE);
 
-      // movl rval, lval
       printf("\tmovl\t");
-      unwrap_storage(rval);
-      printf(", ");
-      unwrap_storage(lval);
-      printf("\n");
 
-      return (storage_t){ .type = ST_NONE };
+      if (rval.type == ST_REGISTER) {
+        // movl %reg, lval
+        printf("%%%s, ", scratch_registers[rval.register_id]);
+        unwrap_storage(lval);
+        printf("\n");
+        return (storage_t){ .type = ST_REGISTER,
+                            .register_id = rval.register_id };
+      } else {
+        // movl rval, %reg
+        // movl %reg, lval
+        assert(*registers_used < (int)REGISTERS_COUNT);
+        int register_id = (*registers_used)++;
+
+        unwrap_storage(rval);
+        printf(", %%%s\n", scratch_registers[register_id]);
+        printf("\tmovl\t%%%s, ", scratch_registers[register_id]);
+        unwrap_storage(lval);
+        printf("\n");
+
+        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+     }
+
     } break;
 
     case NT_SUM: {
@@ -420,19 +435,28 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       storage_t rval = codegen(n->rval, registers_used, stack_offset);
       assert(lval.type != ST_NONE && rval.type != ST_NONE);
 
-      assert(*registers_used < (int)REGISTERS_COUNT);
-      int register_id = (*registers_used)++;
-
-      // movl lval, %reg
       // addl rval, %reg
-      printf("\tmovl\t");
-      unwrap_storage(lval);
-      printf(", %%%s\n", scratch_registers[register_id]);
-      printf("\taddl\t");
-      unwrap_storage(rval);
-      printf(", %%%s\n", scratch_registers[register_id]);
+      if (lval.type == ST_REGISTER) {
+        printf("\taddl\t");
+        unwrap_storage(rval);
+        printf(", %%%s\n", scratch_registers[lval.register_id]);
+        return (storage_t){ .type = ST_REGISTER,
+                            .register_id = lval.register_id };
+      } else {
+        assert(*registers_used < (int)REGISTERS_COUNT);
+        int register_id = (*registers_used)++;
 
-      return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+        // movl lval, %reg
+        // addl rval, %reg
+        printf("\tmovl\t");
+        unwrap_storage(lval);
+        printf(", %%%s\n", scratch_registers[register_id]);
+        printf("\taddl\t");
+        unwrap_storage(rval);
+        printf(", %%%s\n", scratch_registers[register_id]);
+
+        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+      }
     } break;
 
     case NT_SUBTRACTION: {
