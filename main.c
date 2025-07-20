@@ -23,8 +23,8 @@ static char *argument_registers[] = {
 
 typedef enum{
   TT_EMPTY = 0,
-  TT_IDENTIFIER,
-  TT_INTEGER,
+  TT_IDENT,
+  TT_INT,
   TT_EQUAL,
   TT_PLUS,
   TT_MINUS,
@@ -35,25 +35,26 @@ typedef enum{
 
 typedef struct{
   tt_t type;
-  int id;
+  union {
+    char ident_name;
+    int int_value;
+  };
 }token_t;
 
 typedef struct{
-  char identifier_name;
-  bool visibility;
+  char ident_name;
   int stack_offset;
-
-  int integer_value;
+  // int scope_id;
 }symbol_t;
 
 typedef enum{
   NT_EMPTY = 0,
-  NT_ASSIGNMENT,
-  NT_VARIABLE,
-  NT_FUNCTION_CALL,
-  NT_INTEGER,
+  NT_ASSIGN,
+  NT_VAR,
+  NT_FUNC_CALL,
+  NT_INT,
   NT_SUM,
-  NT_SUBTRACTION,
+  NT_SUB,
   NT_COUNT
 }nt_t;
 
@@ -64,11 +65,14 @@ struct node_t{
   node_t *next;
 
   union {
+    int int_value;
+    bool var_declared;
     struct {
       node_t *lval;
       node_t *rval;
     };
     struct {
+      char func_name; // TODO: hack for this one function
       node_t *args[FUNCTION_ARGS_MAX];
       int args_count;
     };
@@ -83,10 +87,12 @@ typedef enum{
 }st_t;
 
 typedef struct{
-  int id;
   st_t type;
-
-  int register_id;
+  union {
+    int id;
+    int register_id;
+    int int_value;
+  };
 }storage_t;
 
 static symbol_t *table = NULL;
@@ -159,37 +165,16 @@ token_t *tokenize(char *s, int len)
         }
 
         token_t t = {0};
-        t.type = TT_INTEGER;
+        t.type = TT_INT;
+        t.int_value = value;
 
-        symbol_t sym = {0};
-        sym.integer_value = value;
-        arrput(table, sym);
-
-        t.id = arrlen(table) - 1;
         arrput(ts, t);
       } break;
 
       default: {
         token_t t = {0};
-        t.type = TT_IDENTIFIER;
-
-        // TODO: rewrite this hack
-        bool found = false;
-        for (int j = 0; j < arrlen(table); j++) {
-          if (table[j].identifier_name == s[i]) {
-            found = true;
-            t.id = j;
-            break;
-          }
-        }
-
-        if (!found) {
-          symbol_t sym = {0};
-          sym.identifier_name = s[i];
-          arrput(table, sym);
-          t.id = arrlen(table) - 1;
-        }
-
+        t.type = TT_IDENT;
+        t.ident_name = s[i];
         arrput(ts, t);
         i += 1;
       } break;
@@ -205,12 +190,12 @@ void print_tokens(token_t *ts)
 
   for (int i = 0; i < arrlen(ts); i++) {
     switch (ts[i].type) {
-      case TT_IDENTIFIER: {
-        printf("`%c` ", table[ts[i].id].identifier_name);
+      case TT_IDENT: {
+        printf("`%c` ", ts[i].ident_name);
       } break;
 
-      case TT_INTEGER: {
-        printf("<%d> ", table[ts[i].id].integer_value);
+      case TT_INT: {
+        printf("<%d> ", ts[i].int_value);
       } break;
 
       case TT_EQUAL: {
@@ -248,16 +233,16 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
   memset(n, 0, sizeof(*n));
 
   switch (ts[*eaten].type) {
-    case TT_INTEGER: {
-      n->type = NT_INTEGER;
-      n->id = ts[*eaten].id;
+    case TT_INT: {
+      n->type = NT_INT;
+      n->int_value = ts[*eaten].int_value;
       *eaten += 1;
     } break;
 
-    case TT_IDENTIFIER: {
+    case TT_IDENT: {
       if (arrlen(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
-        n->type = NT_FUNCTION_CALL;
-        n->id = ts[*eaten].id;
+        n->type = NT_FUNC_CALL;
+        n->func_name = ts[*eaten].ident_name; // TODO: hack
 
         *eaten += 2;
 
@@ -271,14 +256,34 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
 
         *eaten += 1;
       } else {
-        n->type = NT_VARIABLE;
-        n->id = ts[*eaten].id;
+        n->type = NT_VAR;
+
+        bool found = false;
+        int id;
+        for (int i = 0; i < arrlen(table); i++) {
+          if (table[i].ident_name == ts[*eaten].ident_name) {
+            found = true;
+            id = i;
+            break;
+          }
+        }
+
+        if (found) {
+          n->id = id;
+          n->var_declared = true;
+        } else {
+          symbol_t sym = {0};
+          sym.ident_name = ts[*eaten].ident_name;
+          arrput(table, sym);
+          n->id = arrlen(table) - 1;
+        }
+
         *eaten += 1;
       }
     } break;
 
     case TT_EQUAL: {
-      n->type = NT_ASSIGNMENT;
+      n->type = NT_ASSIGN;
       *eaten += 1;
       n->lval = parse(ts, eaten, a);
       n->rval = parse(ts, eaten, a);
@@ -292,7 +297,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
     } break;
 
     case TT_MINUS: {
-      n->type = NT_SUBTRACTION;
+      n->type = NT_SUB;
       *eaten += 1;
       n->lval = parse(ts, eaten, a);
       n->rval = parse(ts, eaten, a);
@@ -313,20 +318,20 @@ void print_ast(node_t *n)
   if (n == NULL) return;
 
   switch (n->type) {
-    case NT_INTEGER: {
-      printf("<%d>", table[n->id].integer_value);
+    case NT_INT: {
+      printf("<%d>", n->int_value);
     } break;
 
-    case NT_VARIABLE: {
-      printf("`%c`", table[n->id].identifier_name);
+    case NT_VAR: {
+      printf("`%c`", table[n->id].ident_name);
     } break;
 
-    case NT_ASSIGNMENT: {
+    case NT_ASSIGN: {
       printf("(= ");
       print_ast(n->lval);
       printf(" ");
       print_ast(n->rval);
-      printf(")");
+      printf(") ");
     } break;
 
     case NT_SUM: {
@@ -337,7 +342,7 @@ void print_ast(node_t *n)
       printf(")");
     } break;
 
-    case NT_SUBTRACTION: {
+    case NT_SUB: {
       printf("(- ");
       print_ast(n->lval);
       printf(" ");
@@ -345,8 +350,8 @@ void print_ast(node_t *n)
       printf(")");
     } break;
 
-    case NT_FUNCTION_CALL: {
-      printf("%c(", table[n->id].identifier_name);
+    case NT_FUNC_CALL: {
+      printf("%c(", n->func_name); // TODO: hack
       for (int i = 0; i < n->args_count; i++) {
         print_ast(n->args[i]);
       }
@@ -373,7 +378,7 @@ void unwrap_storage(storage_t st)
     } break;
 
     case ST_IMMEDIATE: {
-      printf("$%d", table[st.id].integer_value);
+      printf("$%d", st.int_value);
     } break;
 
     default: {
@@ -387,19 +392,18 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
   assert(NT_COUNT == 7);
 
   switch (n->type) {
-    case NT_VARIABLE: {
-      if (!table[n->id].visibility) {
+    case NT_VAR: {
+      if (!n->var_declared) {
         table[n->id].stack_offset = (*stack_offset -= 4);
-        table[n->id].visibility = true;
       }
       return (storage_t){ .id = n->id, .type = ST_STACK };
     } break;
 
-    case NT_INTEGER: {
-      return (storage_t){ .id = n->id, .type = ST_IMMEDIATE };
+    case NT_INT: {
+      return (storage_t){ .type = ST_IMMEDIATE, .int_value = n->int_value };
     } break;
 
-    case NT_ASSIGNMENT: {
+    case NT_ASSIGN: {
       storage_t lval = codegen(n->lval, registers_used, stack_offset);
       storage_t rval = codegen(n->rval, registers_used, stack_offset);
       assert(lval.type != ST_NONE && rval.type != ST_NONE);
@@ -462,7 +466,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       }
     } break;
 
-    case NT_SUBTRACTION: {
+    case NT_SUB: {
       storage_t lval = codegen(n->lval, registers_used, stack_offset);
       storage_t rval = codegen(n->rval, registers_used, stack_offset);
       assert(lval.type != ST_NONE && rval.type != ST_NONE);
@@ -493,7 +497,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       }
     } break;
 
-    case NT_FUNCTION_CALL: {
+    case NT_FUNC_CALL: {
       int storage_count = n->args_count;
 
       for (int i = 0; i < storage_count; i++) {
@@ -510,7 +514,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
       if (allign_offset != 0) {
         printf("\tsubq\t$%d, %%rsp\n", allign_offset);
       }
-      printf("\tcall\t%c\n", table[n->id].identifier_name);
+      printf("\tcall\t%c\n", n->func_name); // TODO: hack
       if (allign_offset != 0) {
         printf("\taddq\t$%d, %%rsp\n", allign_offset);
       }
@@ -563,10 +567,8 @@ int main(int argc, char *argv[])
     }
   }
 
-  /*
-  print_ast(root);
-  printf("\n");
-  */
+  /* print_ast(root); */
+  /* printf("\n"); */
 
   printf(".section .text\n");
   printf(".globl _start\n");
