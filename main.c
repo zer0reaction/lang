@@ -9,6 +9,8 @@
 #define ARENA_IMPLEMENTATION
 #include "arena.h"
 
+#define SCOPE_IDS_SIZE 32
+
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
 
 static char *scratch_registers[] = {
@@ -30,6 +32,8 @@ typedef enum{
     TT_MINUS,
     TT_ROUND_OPEN,
     TT_ROUND_CLOSE,
+    TT_CURLY_OPEN,
+    TT_CURLY_CLOSE,
     TT_COUNT
 }tt_t;
 
@@ -52,6 +56,7 @@ typedef enum{
     NT_ASSIGN,
     NT_VAR,
     NT_FUNC_CALL,
+    NT_SCOPE,
     NT_INT,
     NT_SUM,
     NT_SUB,
@@ -67,6 +72,10 @@ struct node_t{
     union {
         int int_value;
         char var_name;
+        struct {
+            int scope_id;
+            node_t *scope_start;
+        };
         struct {
             node_t *lval;
             node_t *rval;
@@ -103,7 +112,7 @@ token_t *tokenize(char *s, int len)
     int i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 8);
+    assert(TT_COUNT == 10);
 
     while (i < len) {
         switch (s[i]) {
@@ -148,6 +157,20 @@ token_t *tokenize(char *s, int len)
             i += 1;
         } break;
 
+        case '{': {
+            token_t t = {0};
+            t.type = TT_CURLY_OPEN;
+            arrput(ts, t);
+            i += 1;
+        } break;
+
+        case '}': {
+            token_t t = {0};
+            t.type = TT_CURLY_CLOSE;
+            arrput(ts, t);
+            i += 1;
+        } break;
+
         case '0':
         case '1':
         case '2':
@@ -187,7 +210,7 @@ token_t *tokenize(char *s, int len)
 
 void print_tokens(token_t *ts)
 {
-    assert(TT_COUNT == 8);
+    assert(TT_COUNT == 10);
 
     for (int i = 0; i < arrlen(ts); i++) {
         switch (ts[i].type) {
@@ -219,6 +242,14 @@ void print_tokens(token_t *ts)
             printf(") ");
         } break;
 
+        case TT_CURLY_OPEN: {
+            printf("{ ");
+        } break;
+
+        case TT_CURLY_CLOSE: {
+            printf("} ");
+        } break;
+
         default: {
             assert(0 && "unknown token");
         } break;
@@ -229,8 +260,8 @@ void print_tokens(token_t *ts)
 
 node_t *parse(token_t *ts, int *eaten, Arena *a)
 {
-    assert(TT_COUNT == 8);
-    assert(NT_COUNT == 7);
+    assert(TT_COUNT == 10);
+    assert(NT_COUNT == 8);
 
     assert(*eaten < arrlen(ts));
 
@@ -286,6 +317,24 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         n->rval = parse(ts, eaten, a);
     } break;
 
+    case TT_CURLY_OPEN: {
+        n->type = NT_SCOPE;
+        *eaten += 1;
+        node_t *current = NULL;
+        while (ts[*eaten].type != TT_CURLY_CLOSE) {
+            assert(arrlen(ts) - *eaten > 1);
+            node_t *node = parse(ts, eaten, a);
+            if (!n->scope_start) {
+                n->scope_start = node;
+                current = node;
+            } else {
+                current->next = node;
+                current = current->next;
+            }
+        }
+        *eaten += 1;
+    } break;
+
     default: {
         printf("%d\n", ts[*eaten].type);
         assert(0 && "unknown token");
@@ -297,7 +346,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
 
 void print_ast(node_t *n)
 {
-    assert(NT_COUNT == 7);
+    assert(NT_COUNT == 8);
 
     if (n == NULL) return;
 
@@ -307,7 +356,8 @@ void print_ast(node_t *n)
     } break;
 
     case NT_VAR: {
-        printf("`%c`", n->var_name);
+        printf("[%d]`%c`@%d ", n->table_id, table[n->table_id].ident_name,
+               table[n->table_id].stack_offset);
     } break;
 
     case NT_ASSIGN: {
@@ -335,11 +385,17 @@ void print_ast(node_t *n)
     } break;
 
     case NT_FUNC_CALL: {
-        printf("%c(", n->func_name);
+        printf("%c(%d)(", n->func_name, n->allign_offset);
         for (int i = 0; i < n->args_count; i++) {
             print_ast(n->args[i]);
         }
         printf(") ");
+    } break;
+
+    case NT_SCOPE: {
+        printf("{(%d) ", n->scope_id);
+        print_ast(n->scope_start);
+        printf("}\n");
     } break;
 
     default: {
@@ -350,52 +406,26 @@ void print_ast(node_t *n)
     print_ast(n->next);
 }
 
-/* void scope_pass(node_t *n, int *scope_count) */
-/* { */
-/*     // if it is a scope node, set it's id */
-
-/*     // recursively call */
-/* } */
-
-void var_pass(node_t *n, int *stack_offset)
+void scope_pass(node_t *n, int *scope_count)
 {
     if (!n) return;
 
     switch (n->type) {
-    case NT_VAR: {
-        bool found = false;
-        int table_id = 0;
-        for (int i = 0; i < arrlen(table); i++) {
-            if (n->var_name == table[i].ident_name) {
-                found = true;
-                table_id = i;
-                break;
-            }
-        }
-
-        if (found) {
-            n->table_id = table_id;
-        } else {
-            symbol_t sym = {0};
-            sym.ident_name = n->var_name;
-            sym.stack_offset = (*stack_offset -= 4);
-            arrput(table, sym);
-
-            n->table_id = arrlen(table) - 1;
-        }
+    case NT_SCOPE: {
+        n->scope_id = ++(*scope_count);
+        scope_pass(n->scope_start, scope_count);
     } break;
 
     case NT_SUM:
     case NT_SUB:
     case NT_ASSIGN: {
-        var_pass(n->lval, stack_offset);
-        var_pass(n->rval, stack_offset);
+        scope_pass(n->lval, scope_count);
+        scope_pass(n->rval, scope_count);
     } break;
 
     case NT_FUNC_CALL: {
-        n->allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
         for (int i = 0; i < n->args_count; i++) {
-            var_pass(n->args[i], stack_offset);
+            scope_pass(n->args[i], scope_count);
         }
     } break;
 
@@ -403,7 +433,82 @@ void var_pass(node_t *n, int *stack_offset)
         break;
     }
 
-    var_pass(n->next, stack_offset);
+    scope_pass(n->next, scope_count);
+}
+
+void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
+{
+    if (!n) return;
+
+    switch (n->type) {
+    case NT_VAR: {
+        assert(size >= 1);
+        bool in_current_scope = false;
+        int current_scope_id = scope_ids[size - 1];
+
+        for (int i = 0; i < arrlen(table); i++) {
+            if (table[i].scope_id == current_scope_id &&
+                n->var_name == table[i].ident_name) {
+                in_current_scope = true;
+                break;
+            }
+        }
+
+        if (!in_current_scope) {
+            symbol_t sym = {0};
+            sym.ident_name = n->var_name;
+            sym.stack_offset = (*stack_offset -= 4);
+            sym.scope_id = current_scope_id;
+            arrput(table, sym);
+            n->table_id = arrlen(table) - 1;
+        } else {
+            bool visible = false;
+            int table_id = 0;
+            for (int i = 0; i < arrlen(table); i++) {
+                if (n->var_name == table[i].ident_name) {
+                    for (int j = 0; j < size; j++) {
+                        if (scope_ids[j] == table[i].scope_id) {
+                            visible = true;
+                            table_id = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            assert(visible);
+            n->table_id = table_id;
+        }
+    } break;
+
+    case NT_SCOPE: {
+        assert(size < SCOPE_IDS_SIZE);
+        int new_scope_ids[SCOPE_IDS_SIZE] = {0};
+        for (int i = 0; i < size; i++) {
+            new_scope_ids[i] = scope_ids[i];
+        }
+        new_scope_ids[size] = n->scope_id;
+        var_pass(n->scope_start, stack_offset, new_scope_ids, size + 1);
+    } break;
+
+    case NT_SUM:
+    case NT_SUB:
+    case NT_ASSIGN: {
+        var_pass(n->lval, stack_offset, scope_ids, size);
+        var_pass(n->rval, stack_offset, scope_ids, size);
+    } break;
+
+    case NT_FUNC_CALL: {
+        n->allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+        for (int i = 0; i < n->args_count; i++) {
+            var_pass(n->args[i], stack_offset, scope_ids, size);
+        }
+    } break;
+
+    default:
+        break;
+    }
+
+    var_pass(n->next, stack_offset, scope_ids, size);
 }
 
 void unwrap_storage(storage_t st)
@@ -429,7 +534,7 @@ void unwrap_storage(storage_t st)
 
 storage_t codegen(node_t *n, int *registers_used)
 {
-    assert(NT_COUNT == 7);
+    assert(NT_COUNT == 8);
 
     switch (n->type) {
     case NT_VAR: {
@@ -555,6 +660,16 @@ storage_t codegen(node_t *n, int *registers_used)
         return (storage_t){ .type = ST_NONE };
     } break;
 
+    case NT_SCOPE: {
+        node_t *current = n->scope_start;
+        while (current) {
+            int registers_used_in_scope = 0;
+            codegen(current, &registers_used_in_scope);
+            current = current->next;
+        }
+        return (storage_t){ .type = ST_NONE };
+    } break;
+
     default: {
         assert(0 && "unexpected node");
     } break;
@@ -585,7 +700,9 @@ int main(int argc, char *argv[])
     s[file_size] = '\0';
 
     token_t *ts = tokenize(s, strlen(s));
-    /* print_tokens(ts); */
+    /*
+    print_tokens(ts);
+    */
 
     int eaten = 0;
     node_t *root = NULL;
@@ -601,11 +718,17 @@ int main(int argc, char *argv[])
         }
     }
 
-    int stack_offset = 0;
-    var_pass(root, &stack_offset);
+    int scope_count = 0;
+    scope_pass(root, &scope_count);
 
-    /* print_ast(root); */
-    /* printf("\n"); */
+    int stack_offset = 0;
+    int scope_ids[SCOPE_IDS_SIZE] = {0};
+    var_pass(root, &stack_offset, scope_ids, 1);
+
+/*
+    print_ast(root);
+    printf("\n");
+*/
 
     printf(".section .text\n");
     printf(".globl _start\n");
@@ -629,11 +752,9 @@ int main(int argc, char *argv[])
     printf("\tmovq\t%%rsp, %%rbp\n");
     printf("\n");
 
-    int registers_used = 0;
     current = root;
-
     while (current) {
-        registers_used = 0;
+        int registers_used = 0;
         codegen(current, &registers_used);
         current = current->next;
     }
