@@ -30,6 +30,7 @@ typedef enum{
     TT_EQUAL,
     TT_PLUS,
     TT_MINUS,
+    TT_L,
     TT_ROUND_OPEN,
     TT_ROUND_CLOSE,
     TT_CURLY_OPEN,
@@ -55,6 +56,7 @@ typedef enum{
     NT_EMPTY = 0,
     NT_ASSIGN,
     NT_VAR,
+    NT_DECL,
     NT_FUNC_CALL,
     NT_SCOPE,
     NT_INT,
@@ -112,7 +114,7 @@ token_t *tokenize(char *s, int len)
     int i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 10);
+    assert(TT_COUNT == 11);
 
     while (i < len) {
         switch (s[i]) {
@@ -167,6 +169,13 @@ token_t *tokenize(char *s, int len)
         case '}': {
             token_t t = {0};
             t.type = TT_CURLY_CLOSE;
+            arrput(ts, t);
+            i += 1;
+        } break;
+
+        case 'L': {
+            token_t t = {0};
+            t.type = TT_L;
             arrput(ts, t);
             i += 1;
         } break;
@@ -260,8 +269,8 @@ void print_tokens(token_t *ts)
 
 node_t *parse(token_t *ts, int *eaten, Arena *a)
 {
-    assert(TT_COUNT == 10);
-    assert(NT_COUNT == 8);
+    assert(TT_COUNT == 11);
+    assert(NT_COUNT == 9);
 
     assert(*eaten < arrlen(ts));
 
@@ -273,6 +282,15 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         n->type = NT_INT;
         n->int_value = ts[*eaten].int_value;
         *eaten += 1;
+    } break;
+
+    case TT_L: {
+        assert(arrlen(ts) - *eaten >= 2);
+        assert(ts[*eaten + 1].type == TT_IDENT);
+
+        n->type = NT_DECL;
+        n->var_name = ts[*eaten + 1].ident_name;
+        *eaten += 2;
     } break;
 
     case TT_IDENT: {
@@ -408,6 +426,8 @@ void print_ast(node_t *n)
 
 void scope_pass(node_t *n, int *scope_count)
 {
+    assert(NT_COUNT == 9);
+
     if (!n) return;
 
     switch (n->type) {
@@ -438,10 +458,12 @@ void scope_pass(node_t *n, int *scope_count)
 
 void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
 {
+    assert(NT_COUNT == 9);
+
     if (!n) return;
 
     switch (n->type) {
-    case NT_VAR: {
+    case NT_DECL: {
         assert(size >= 1);
         bool in_current_scope = false;
         int current_scope_id = scope_ids[size - 1];
@@ -454,30 +476,32 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
             }
         }
 
-        if (!in_current_scope) {
-            symbol_t sym = {0};
-            sym.ident_name = n->var_name;
-            sym.stack_offset = (*stack_offset -= 4);
-            sym.scope_id = current_scope_id;
-            arrput(table, sym);
-            n->table_id = arrlen(table) - 1;
-        } else {
-            bool visible = false;
-            int table_id = 0;
-            for (int i = 0; i < arrlen(table); i++) {
-                if (n->var_name == table[i].ident_name) {
-                    for (int j = 0; j < size; j++) {
-                        if (scope_ids[j] == table[i].scope_id) {
-                            visible = true;
-                            table_id = i;
-                            break;
-                        }
+        assert(!in_current_scope);
+
+        symbol_t sym = {0};
+        sym.ident_name = n->var_name;
+        sym.stack_offset = (*stack_offset -= 4);
+        sym.scope_id = current_scope_id;
+        arrput(table, sym);
+        n->table_id = arrlen(table) - 1;
+    } break;
+
+    case NT_VAR: {
+        bool visible = false;
+        int table_id = 0;
+        for (int i = 0; i < arrlen(table); i++) {
+            if (n->var_name == table[i].ident_name) {
+                for (int j = size - 1; j >= 0; j--) {
+                    if (scope_ids[j] == table[i].scope_id) {
+                        visible = true;
+                        table_id = i;
+                        break;
                     }
                 }
             }
-            assert(visible);
-            n->table_id = table_id;
         }
+        assert(visible);
+        n->table_id = table_id;
     } break;
 
     case NT_SCOPE: {
@@ -534,9 +558,10 @@ void unwrap_storage(storage_t st)
 
 storage_t codegen(node_t *n, int *registers_used)
 {
-    assert(NT_COUNT == 8);
+    assert(NT_COUNT == 9);
 
     switch (n->type) {
+    case NT_DECL:
     case NT_VAR: {
         return (storage_t){ .table_id = n->table_id, .type = ST_STACK };
     } break;
