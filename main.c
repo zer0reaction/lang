@@ -31,6 +31,7 @@ typedef enum{
     TT_PLUS,
     TT_MINUS,
     TT_L,
+    TT_W,
     TT_ROUND_OPEN,
     TT_ROUND_CLOSE,
     TT_CURLY_OPEN,
@@ -57,6 +58,7 @@ typedef enum{
     NT_ASSIGN,
     NT_VAR,
     NT_DECL,
+    NT_WHILE,
     NT_FUNC_CALL,
     NT_SCOPE,
     NT_INT,
@@ -74,6 +76,10 @@ struct node_t{
     union {
         int int_value;
         char var_name;
+        struct {
+            node_t *while_cond;
+            node_t *while_body;
+        };
         struct {
             int scope_id;
             node_t *scope_start;
@@ -114,7 +120,7 @@ token_t *tokenize(char *s, int len)
     int i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 11);
+    assert(TT_COUNT == 12);
 
     while (i < len) {
         switch (s[i]) {
@@ -176,6 +182,13 @@ token_t *tokenize(char *s, int len)
         case 'L': {
             token_t t = {0};
             t.type = TT_L;
+            arrput(ts, t);
+            i += 1;
+        } break;
+
+        case 'W': {
+            token_t t = {0};
+            t.type = TT_W;
             arrput(ts, t);
             i += 1;
         } break;
@@ -269,8 +282,8 @@ void print_tokens(token_t *ts)
 
 node_t *parse(token_t *ts, int *eaten, Arena *a)
 {
-    assert(TT_COUNT == 11);
-    assert(NT_COUNT == 9);
+    assert(TT_COUNT == 12);
+    assert(NT_COUNT == 10);
 
     assert(*eaten < arrlen(ts));
 
@@ -291,6 +304,13 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         n->type = NT_DECL;
         n->var_name = ts[*eaten + 1].ident_name;
         *eaten += 2;
+    } break;
+
+    case TT_W: {
+        n->type = NT_WHILE;
+        *eaten += 1;
+        n->while_cond = parse(ts, eaten, a);
+        n->while_body = parse(ts, eaten, a);
     } break;
 
     case TT_IDENT: {
@@ -364,7 +384,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
 
 void print_ast(node_t *n)
 {
-    assert(NT_COUNT == 8);
+    assert(NT_COUNT == 10);
 
     if (n == NULL) return;
 
@@ -416,6 +436,17 @@ void print_ast(node_t *n)
         printf("}\n");
     } break;
 
+    case NT_DECL: {
+        printf("Let[%d]`%c`@%d ", n->table_id, table[n->table_id].ident_name,
+               table[n->table_id].stack_offset);
+    } break;
+
+    case NT_WHILE: {
+        printf("While");
+        print_ast(n->while_cond);
+        print_ast(n->while_body);
+    } break;
+
     default: {
         assert(0 && "unexpected node");
     } break;
@@ -426,7 +457,7 @@ void print_ast(node_t *n)
 
 void scope_pass(node_t *n, int *scope_count)
 {
-    assert(NT_COUNT == 9);
+    assert(NT_COUNT == 10);
 
     if (!n) return;
 
@@ -441,6 +472,11 @@ void scope_pass(node_t *n, int *scope_count)
     case NT_ASSIGN: {
         scope_pass(n->lval, scope_count);
         scope_pass(n->rval, scope_count);
+    } break;
+
+    case NT_WHILE: {
+        scope_pass(n->while_cond, scope_count);
+        scope_pass(n->while_body, scope_count);
     } break;
 
     case NT_FUNC_CALL: {
@@ -458,7 +494,7 @@ void scope_pass(node_t *n, int *scope_count)
 
 void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
 {
-    assert(NT_COUNT == 9);
+    assert(NT_COUNT == 10);
 
     if (!n) return;
 
@@ -521,6 +557,11 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
         var_pass(n->rval, stack_offset, scope_ids, size);
     } break;
 
+    case NT_WHILE: {
+        var_pass(n->while_cond, stack_offset, scope_ids, size);
+        var_pass(n->while_body, stack_offset, scope_ids, size);
+    } break;
+
     case NT_FUNC_CALL: {
         n->allign_offset = ABSOLUTE(*stack_offset) +
                            (16 - ABSOLUTE(*stack_offset) % 16) % 16;
@@ -559,7 +600,7 @@ void unwrap_storage(storage_t st)
 
 storage_t codegen(node_t *n, int *registers_used)
 {
-    assert(NT_COUNT == 9);
+    assert(NT_COUNT == 10);
 
     switch (n->type) {
     case NT_DECL:
@@ -689,10 +730,68 @@ storage_t codegen(node_t *n, int *registers_used)
     case NT_SCOPE: {
         node_t *current = n->scope_start;
         while (current) {
-            int registers_used_in_scope = 0;
-            codegen(current, &registers_used_in_scope);
+            codegen(current, registers_used);
             current = current->next;
         }
+        return (storage_t){ .type = ST_NONE };
+    } break;
+
+    case NT_WHILE: {
+        // .while_start_<ident>
+        //     (code for the cond)
+        //     cmpl $0, cond_norm
+        //     jz .while_end_<ident>
+        //
+        //     (code for the body)
+        //
+        //     jmp .while_start_<ident>
+        // .while_end_<ident>
+
+        unsigned ident = rand(); // TODO: can possibly collide
+
+        printf(".while_start_%u:\n", ident);
+
+        storage_t cond_init = codegen(n->while_cond, registers_used);
+        assert(cond_init.type != ST_NONE);
+
+        storage_t cond_norm = {0};
+
+        switch (cond_init.type) {
+        case ST_IMMEDIATE: {
+            assert(*registers_used < (int)REGISTERS_COUNT);
+            int register_id = (*registers_used)++;
+
+            printf("\tmovl\t$%d, %%%s\n", cond_init.int_value,
+                   scratch_registers[register_id]);
+
+            cond_norm.type = ST_REGISTER;
+            cond_norm.register_id = register_id;
+        } break;
+
+        case ST_REGISTER: {
+            cond_norm.type = ST_REGISTER;
+            cond_norm.register_id = cond_init.register_id;
+        } break;
+
+        case ST_STACK: {
+            cond_norm.type = ST_STACK;
+            cond_norm.table_id = cond_init.table_id;
+        } break;
+
+        default:
+            assert(0 && "unknown storage type");
+        }
+
+        printf("\tcmpl\t$0, ");
+        unwrap_storage(cond_norm);
+        printf("\n");
+        printf("\tjz\t.while_end_%u\n", ident);
+
+        codegen(n->while_body, registers_used);
+
+        printf("\tjmp\t.while_start_%u\n", ident);
+        printf(".while_end_%u:\n", ident);
+
         return (storage_t){ .type = ST_NONE };
     } break;
 
