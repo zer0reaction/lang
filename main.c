@@ -522,7 +522,8 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
     } break;
 
     case NT_FUNC_CALL: {
-        n->allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+        n->allign_offset = ABSOLUTE(*stack_offset) +
+                           (16 - ABSOLUTE(*stack_offset) % 16) % 16;
         for (int i = 0; i < n->args_count; i++) {
             var_pass(n->args[i], stack_offset, scope_ids, size);
         }
