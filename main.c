@@ -44,7 +44,7 @@ typedef struct{
 typedef struct{
     char ident_name;
     int stack_offset;
-    // int scope_id;
+    int scope_id;
 }symbol_t;
 
 typedef enum{
@@ -60,21 +60,22 @@ typedef enum{
 
 typedef struct node_t node_t;
 struct node_t{
-    int id;
     nt_t type;
+    int table_id;
     node_t *next;
 
     union {
         int int_value;
-        bool var_declared;
+        char var_name;
         struct {
             node_t *lval;
             node_t *rval;
         };
         struct {
-            char func_name; // TODO: hack for this one function
+            char func_name;
             node_t *args[FUNCTION_ARGS_MAX];
             int args_count;
+            int allign_offset;
         };
     };
 };
@@ -89,7 +90,7 @@ typedef enum{
 typedef struct{
     st_t type;
     union {
-        int id;
+        int table_id;
         int register_id;
         int int_value;
     };
@@ -186,7 +187,7 @@ token_t *tokenize(char *s, int len)
 
 void print_tokens(token_t *ts)
 {
-    assert(TT_COUNT == 7);
+    assert(TT_COUNT == 8);
 
     for (int i = 0; i < arrlen(ts); i++) {
         switch (ts[i].type) {
@@ -204,6 +205,10 @@ void print_tokens(token_t *ts)
 
         case TT_PLUS: {
             printf("+ ");
+        } break;
+
+        case TT_MINUS: {
+            printf("- ");
         } break;
 
         case TT_ROUND_OPEN: {
@@ -242,13 +247,11 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
     case TT_IDENT: {
         if (arrlen(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
             n->type = NT_FUNC_CALL;
-            n->func_name = ts[*eaten].ident_name; // TODO: hack
-
+            n->func_name = ts[*eaten].ident_name;
             *eaten += 2;
 
             while (ts[*eaten].type != TT_ROUND_CLOSE) {
                 assert(arrlen(ts) - *eaten > 1);
-
                 assert(n->args_count < (int)FUNCTION_ARGS_MAX);
                 node_t *arg = parse(ts, eaten, a);
                 n->args[n->args_count++] = arg;
@@ -257,27 +260,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
             *eaten += 1;
         } else {
             n->type = NT_VAR;
-
-            bool found = false;
-            int id;
-            for (int i = 0; i < arrlen(table); i++) {
-                if (table[i].ident_name == ts[*eaten].ident_name) {
-                    found = true;
-                    id = i;
-                    break;
-                }
-            }
-
-            if (found) {
-                n->id = id;
-                n->var_declared = true;
-            } else {
-                symbol_t sym = {0};
-                sym.ident_name = ts[*eaten].ident_name;
-                arrput(table, sym);
-                n->id = arrlen(table) - 1;
-            }
-
+            n->var_name = ts[*eaten].ident_name;
             *eaten += 1;
         }
     } break;
@@ -304,6 +287,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
     } break;
 
     default: {
+        printf("%d\n", ts[*eaten].type);
         assert(0 && "unknown token");
     } break;
     }
@@ -323,7 +307,7 @@ void print_ast(node_t *n)
     } break;
 
     case NT_VAR: {
-        printf("`%c`", table[n->id].ident_name);
+        printf("`%c`", n->var_name);
     } break;
 
     case NT_ASSIGN: {
@@ -339,7 +323,7 @@ void print_ast(node_t *n)
         print_ast(n->lval);
         printf(" ");
         print_ast(n->rval);
-        printf(")");
+        printf(") ");
     } break;
 
     case NT_SUB: {
@@ -347,11 +331,11 @@ void print_ast(node_t *n)
         print_ast(n->lval);
         printf(" ");
         print_ast(n->rval);
-        printf(")");
+        printf(") ");
     } break;
 
     case NT_FUNC_CALL: {
-        printf("%c(", n->func_name); // TODO: hack
+        printf("%c(", n->func_name);
         for (int i = 0; i < n->args_count; i++) {
             print_ast(n->args[i]);
         }
@@ -366,11 +350,67 @@ void print_ast(node_t *n)
     print_ast(n->next);
 }
 
+/* void scope_pass(node_t *n, int *scope_count) */
+/* { */
+/*     // if it is a scope node, set it's id */
+
+/*     // recursively call */
+/* } */
+
+void var_pass(node_t *n, int *stack_offset)
+{
+    if (!n) return;
+
+    switch (n->type) {
+    case NT_VAR: {
+        bool found = false;
+        int table_id = 0;
+        for (int i = 0; i < arrlen(table); i++) {
+            if (n->var_name == table[i].ident_name) {
+                found = true;
+                table_id = i;
+                break;
+            }
+        }
+
+        if (found) {
+            n->table_id = table_id;
+        } else {
+            symbol_t sym = {0};
+            sym.ident_name = n->var_name;
+            sym.stack_offset = (*stack_offset -= 4);
+            arrput(table, sym);
+
+            n->table_id = arrlen(table) - 1;
+        }
+    } break;
+
+    case NT_SUM:
+    case NT_SUB:
+    case NT_ASSIGN: {
+        var_pass(n->lval, stack_offset);
+        var_pass(n->rval, stack_offset);
+    } break;
+
+    case NT_FUNC_CALL: {
+        n->allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+        for (int i = 0; i < n->args_count; i++) {
+            var_pass(n->args[i], stack_offset);
+        }
+    } break;
+
+    default:
+        break;
+    }
+
+    var_pass(n->next, stack_offset);
+}
+
 void unwrap_storage(storage_t st)
 {
     switch (st.type) {
     case ST_STACK: {
-        printf("%d(%%rbp)", table[st.id].stack_offset);
+        printf("%d(%%rbp)", table[st.table_id].stack_offset);
     } break;
 
     case ST_REGISTER: {
@@ -387,16 +427,13 @@ void unwrap_storage(storage_t st)
     }
 }
 
-storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
+storage_t codegen(node_t *n, int *registers_used)
 {
     assert(NT_COUNT == 7);
 
     switch (n->type) {
     case NT_VAR: {
-        if (!n->var_declared) {
-            table[n->id].stack_offset = (*stack_offset -= 4);
-        }
-        return (storage_t){ .id = n->id, .type = ST_STACK };
+        return (storage_t){ .table_id = n->table_id, .type = ST_STACK };
     } break;
 
     case NT_INT: {
@@ -404,8 +441,8 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
     } break;
 
     case NT_ASSIGN: {
-        storage_t lval = codegen(n->lval, registers_used, stack_offset);
-        storage_t rval = codegen(n->rval, registers_used, stack_offset);
+        storage_t lval = codegen(n->lval, registers_used);
+        storage_t rval = codegen(n->rval, registers_used);
         assert(lval.type != ST_NONE && rval.type != ST_NONE);
 
         printf("\tmovl\t");
@@ -416,8 +453,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
             printf(", ");
             unwrap_storage(lval);
             printf("\n");
-            return (storage_t){ .type = ST_REGISTER,
-                                .register_id = rval.register_id };
+            return (storage_t){ .type = ST_REGISTER, .register_id = rval.register_id };
         } else {
             // movl rval, %reg
             // movl %reg, lval
@@ -436,8 +472,8 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
     } break;
 
     case NT_SUM: {
-        storage_t lval = codegen(n->lval, registers_used, stack_offset);
-        storage_t rval = codegen(n->rval, registers_used, stack_offset);
+        storage_t lval = codegen(n->lval, registers_used);
+        storage_t rval = codegen(n->rval, registers_used);
         assert(lval.type != ST_NONE && rval.type != ST_NONE);
 
         // addl rval, %reg
@@ -447,8 +483,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
             printf(", ");
             unwrap_storage(lval);
             printf("\n");
-            return (storage_t){ .type = ST_REGISTER,
-                                .register_id = lval.register_id };
+            return (storage_t){ .type = ST_REGISTER, .register_id = lval.register_id };
         } else {
             assert(*registers_used < (int)REGISTERS_COUNT);
             int register_id = (*registers_used)++;
@@ -467,8 +502,8 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
     } break;
 
     case NT_SUB: {
-        storage_t lval = codegen(n->lval, registers_used, stack_offset);
-        storage_t rval = codegen(n->rval, registers_used, stack_offset);
+        storage_t lval = codegen(n->lval, registers_used);
+        storage_t rval = codegen(n->rval, registers_used);
         assert(lval.type != ST_NONE && rval.type != ST_NONE);
 
         // subl rval, %reg
@@ -478,8 +513,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
             printf(", ");
             unwrap_storage(lval);
             printf("\n");
-            return (storage_t){ .type = ST_REGISTER,
-                                .register_id = lval.register_id };
+            return (storage_t){ .type = ST_REGISTER, .register_id = lval.register_id };
         } else {
             assert(*registers_used < (int)REGISTERS_COUNT);
             int register_id = (*registers_used)++;
@@ -501,7 +535,7 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
         int storage_count = n->args_count;
 
         for (int i = 0; i < storage_count; i++) {
-            storage_t st = codegen(n->args[i], registers_used, stack_offset);
+            storage_t st = codegen(n->args[i], registers_used);
             assert(st.type != ST_NONE);
 
             // movl arg, reg
@@ -510,13 +544,12 @@ storage_t codegen(node_t *n, int *registers_used, int *stack_offset)
             printf(", %%%s\n", argument_registers[i]);
         }
 
-        int allign_offset = (16 - ABSOLUTE(*stack_offset) % 16) % 16;
-        if (allign_offset != 0) {
-            printf("\tsubq\t$%d, %%rsp\n", allign_offset);
+        if (n->allign_offset != 0) {
+            printf("\tsubq\t$%d, %%rsp\n", n->allign_offset);
         }
-        printf("\tcall\t%c\n", n->func_name); // TODO: hack
-        if (allign_offset != 0) {
-            printf("\taddq\t$%d, %%rsp\n", allign_offset);
+        printf("\tcall\t%c\n", n->func_name);
+        if (n->allign_offset != 0) {
+            printf("\taddq\t$%d, %%rsp\n", n->allign_offset);
         }
 
         return (storage_t){ .type = ST_NONE };
@@ -552,6 +585,7 @@ int main(int argc, char *argv[])
     s[file_size] = '\0';
 
     token_t *ts = tokenize(s, strlen(s));
+    /* print_tokens(ts); */
 
     int eaten = 0;
     node_t *root = NULL;
@@ -566,6 +600,9 @@ int main(int argc, char *argv[])
             current = current->next;
         }
     }
+
+    int stack_offset = 0;
+    var_pass(root, &stack_offset);
 
     /* print_ast(root); */
     /* printf("\n"); */
@@ -592,14 +629,12 @@ int main(int argc, char *argv[])
     printf("\tmovq\t%%rsp, %%rbp\n");
     printf("\n");
 
-
     int registers_used = 0;
-    int stack_offset = 0;
     current = root;
 
     while (current) {
         registers_used = 0;
-        codegen(current, &registers_used, &stack_offset);
+        codegen(current, &registers_used);
         current = current->next;
     }
 
