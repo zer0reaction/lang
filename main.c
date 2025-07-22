@@ -598,6 +598,65 @@ void unwrap_storage(storage_t st)
     }
 }
 
+/*
+  immediate -> move to register
+  register  -> do nothing
+  stack     -> move to register
+*/
+storage_t move_to_register(storage_t st, int *registers_used)
+{
+    switch (st.type) {
+    case ST_REGISTER: {
+        return st;
+    } break;
+
+    case ST_IMMEDIATE: {
+        assert(*registers_used < (int)REGISTERS_COUNT);
+        int register_id = (*registers_used)++;
+        printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_registers[register_id]);
+        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+    } break;
+
+    case ST_STACK: {
+        assert(*registers_used < (int)REGISTERS_COUNT);
+        int register_id = (*registers_used)++;
+        printf("\tmovl\t%d(%%rbp), %%%s\n", table[st.table_id].stack_offset, scratch_registers[register_id]);
+        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+    } break;
+
+    default:
+        assert(0 && "unknown storage type");
+    }
+}
+
+/*
+  immediate -> move to register
+  register  -> do nothing
+  stack     -> do nothing
+*/
+storage_t make_mutable(storage_t st, int *registers_used)
+{
+    switch (st.type) {
+    case ST_IMMEDIATE: {
+        assert(*registers_used < (int)REGISTERS_COUNT);
+        int register_id = (*registers_used)++;
+        printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_registers[register_id]);
+        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+    } break;
+
+    case ST_REGISTER: {
+        return st;
+    } break;
+
+    case ST_STACK: {
+        return st;
+    } break;
+
+    default:
+        assert(0 && "unknown storage type");
+    }
+}
+
 storage_t codegen(node_t *n, int *registers_used)
 {
     assert(NT_COUNT == 10);
@@ -614,93 +673,50 @@ storage_t codegen(node_t *n, int *registers_used)
 
     case NT_ASSIGN: {
         storage_t lval = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
-        assert(lval.type != ST_NONE && rval.type != ST_NONE);
+        storage_t rval_init = codegen(n->rval, registers_used);
+        assert(lval.type != ST_NONE && rval_init.type != ST_NONE);
+
+        storage_t rval_reg = move_to_register(rval_init, registers_used);
 
         printf("\tmovl\t");
+        unwrap_storage(rval_reg);
+        printf(", ");
+        unwrap_storage(lval);
+        printf("\n");
 
-        if (rval.type == ST_REGISTER) {
-            // movl %reg, lval
-            unwrap_storage(rval);
-            printf(", ");
-            unwrap_storage(lval);
-            printf("\n");
-            return (storage_t){ .type = ST_REGISTER, .register_id = rval.register_id };
-        } else {
-            // movl rval, %reg
-            // movl %reg, lval
-            assert(*registers_used < (int)REGISTERS_COUNT);
-            int register_id = (*registers_used)++;
-
-            unwrap_storage(rval);
-            printf(", %%%s\n", scratch_registers[register_id]);
-            printf("\tmovl\t%%%s, ", scratch_registers[register_id]);
-            unwrap_storage(lval);
-            printf("\n");
-
-            return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
-        }
-
+        return rval_reg;
     } break;
 
     case NT_SUM: {
-        storage_t lval = codegen(n->lval, registers_used);
+        storage_t lval_init = codegen(n->lval, registers_used);
         storage_t rval = codegen(n->rval, registers_used);
-        assert(lval.type != ST_NONE && rval.type != ST_NONE);
+        assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        // addl rval, %reg
-        if (lval.type == ST_REGISTER) {
-            printf("\taddl\t");
-            unwrap_storage(rval);
-            printf(", ");
-            unwrap_storage(lval);
-            printf("\n");
-            return (storage_t){ .type = ST_REGISTER, .register_id = lval.register_id };
-        } else {
-            assert(*registers_used < (int)REGISTERS_COUNT);
-            int register_id = (*registers_used)++;
+        storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-            // movl lval, %reg
-            // addl rval, %reg
-            printf("\tmovl\t");
-            unwrap_storage(lval);
-            printf(", %%%s\n", scratch_registers[register_id]);
-            printf("\taddl\t");
-            unwrap_storage(rval);
-            printf(", %%%s\n", scratch_registers[register_id]);
+        printf("\taddl\t");
+        unwrap_storage(rval);
+        printf(", ");
+        unwrap_storage(lval_reg);
+        printf("\n");
 
-            return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
-        }
+        return lval_reg;
     } break;
 
     case NT_SUB: {
-        storage_t lval = codegen(n->lval, registers_used);
+        storage_t lval_init = codegen(n->lval, registers_used);
         storage_t rval = codegen(n->rval, registers_used);
-        assert(lval.type != ST_NONE && rval.type != ST_NONE);
+        assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        // subl rval, %reg
-        if (lval.type == ST_REGISTER) {
-            printf("\tsubl\t");
-            unwrap_storage(rval);
-            printf(", ");
-            unwrap_storage(lval);
-            printf("\n");
-            return (storage_t){ .type = ST_REGISTER, .register_id = lval.register_id };
-        } else {
-            assert(*registers_used < (int)REGISTERS_COUNT);
-            int register_id = (*registers_used)++;
+        storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-            // movl lval, %reg
-            // subl rval, %reg
-            printf("\tmovl\t");
-            unwrap_storage(lval);
-            printf(", %%%s\n", scratch_registers[register_id]);
-            printf("\tsubl\t");
-            unwrap_storage(rval);
-            printf(", %%%s\n", scratch_registers[register_id]);
+        printf("\tsubl\t");
+        unwrap_storage(rval);
+        printf(", ");
+        unwrap_storage(lval_reg);
+        printf("\n");
 
-            return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
-        }
+        return lval_reg;
     } break;
 
     case NT_FUNC_CALL: {
@@ -710,7 +726,6 @@ storage_t codegen(node_t *n, int *registers_used)
             storage_t st = codegen(n->args[i], registers_used);
             assert(st.type != ST_NONE);
 
-            // movl arg, reg
             printf("\tmovl\t");
             unwrap_storage(st);
             printf(", %%%s\n", argument_registers[i]);
@@ -721,7 +736,7 @@ storage_t codegen(node_t *n, int *registers_used)
         }
         printf("\tcall\t%c\n", n->func_name);
         if (n->allign_offset != 0) {
-            printf("\taddq\t$%d, %%rsp\n", n->allign_offset);
+            printf("\taddq\t$%d, %%rsp\n", n->allign_offset); // TODO: refactor, lame
         }
 
         return (storage_t){ .type = ST_NONE };
@@ -737,16 +752,6 @@ storage_t codegen(node_t *n, int *registers_used)
     } break;
 
     case NT_WHILE: {
-        // .while_start_<ident>
-        //     (code for the cond)
-        //     cmpl $0, cond_norm
-        //     jz .while_end_<ident>
-        //
-        //     (code for the body)
-        //
-        //     jmp .while_start_<ident>
-        // .while_end_<ident>
-
         unsigned ident = rand(); // TODO: can possibly collide
 
         printf(".while_start_%u:\n", ident);
@@ -754,36 +759,10 @@ storage_t codegen(node_t *n, int *registers_used)
         storage_t cond_init = codegen(n->while_cond, registers_used);
         assert(cond_init.type != ST_NONE);
 
-        storage_t cond_norm = {0};
-
-        switch (cond_init.type) {
-        case ST_IMMEDIATE: {
-            assert(*registers_used < (int)REGISTERS_COUNT);
-            int register_id = (*registers_used)++;
-
-            printf("\tmovl\t$%d, %%%s\n", cond_init.int_value,
-                   scratch_registers[register_id]);
-
-            cond_norm.type = ST_REGISTER;
-            cond_norm.register_id = register_id;
-        } break;
-
-        case ST_REGISTER: {
-            cond_norm.type = ST_REGISTER;
-            cond_norm.register_id = cond_init.register_id;
-        } break;
-
-        case ST_STACK: {
-            cond_norm.type = ST_STACK;
-            cond_norm.table_id = cond_init.table_id;
-        } break;
-
-        default:
-            assert(0 && "unknown storage type");
-        }
+        storage_t cond_mut = make_mutable(cond_init, registers_used);
 
         printf("\tcmpl\t$0, ");
-        unwrap_storage(cond_norm);
+        unwrap_storage(cond_mut);
         printf("\n");
         printf("\tjz\t.while_end_%u\n", ident);
 
