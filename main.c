@@ -32,6 +32,8 @@ typedef enum{
     TT_MINUS,
     TT_L,
     TT_W,
+    TT_I,
+    TT_E,
     TT_ROUND_OPEN,
     TT_ROUND_CLOSE,
     TT_CURLY_OPEN,
@@ -59,6 +61,7 @@ typedef enum{
     NT_VAR,
     NT_DECL,
     NT_WHILE,
+    NT_IF,
     NT_FUNC_CALL,
     NT_SCOPE,
     NT_INT,
@@ -79,6 +82,11 @@ struct node_t{
         struct {
             node_t *while_cond;
             node_t *while_body;
+        };
+        struct {
+            node_t *if_cond;
+            node_t *if_body;
+            node_t *else_body;
         };
         struct {
             int scope_id;
@@ -120,7 +128,7 @@ token_t *tokenize(char *s, int len)
     int i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 12);
+    assert(TT_COUNT == 14);
 
     while (i < len) {
         switch (s[i]) {
@@ -189,6 +197,20 @@ token_t *tokenize(char *s, int len)
         case 'W': {
             token_t t = {0};
             t.type = TT_W;
+            arrput(ts, t);
+            i += 1;
+        } break;
+
+        case 'I': {
+            token_t t = {0};
+            t.type = TT_I;
+            arrput(ts, t);
+            i += 1;
+        } break;
+
+        case 'E': {
+            token_t t = {0};
+            t.type = TT_E;
             arrput(ts, t);
             i += 1;
         } break;
@@ -282,8 +304,8 @@ void print_tokens(token_t *ts)
 
 node_t *parse(token_t *ts, int *eaten, Arena *a)
 {
-    assert(TT_COUNT == 12);
-    assert(NT_COUNT == 10);
+    assert(TT_COUNT == 14);
+    assert(NT_COUNT == 11);
 
     assert(*eaten < arrlen(ts));
 
@@ -311,6 +333,18 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         *eaten += 1;
         n->while_cond = parse(ts, eaten, a);
         n->while_body = parse(ts, eaten, a);
+    } break;
+
+    case TT_I: {
+        n->type = NT_IF;
+        *eaten += 1;
+        n->if_cond = parse(ts, eaten, a);
+        n->if_body = parse(ts, eaten, a);
+
+        if (*eaten < arrlen(ts) && ts[*eaten].type == TT_E) {
+            *eaten += 1;
+            n->else_body = parse(ts, eaten, a);
+        }
     } break;
 
     case TT_IDENT: {
@@ -457,7 +491,7 @@ void print_ast(node_t *n)
 
 void scope_pass(node_t *n, int *scope_count)
 {
-    assert(NT_COUNT == 10);
+    assert(NT_COUNT == 11);
 
     if (!n) return;
 
@@ -479,6 +513,12 @@ void scope_pass(node_t *n, int *scope_count)
         scope_pass(n->while_body, scope_count);
     } break;
 
+    case NT_IF: {
+        scope_pass(n->if_cond, scope_count);
+        scope_pass(n->if_body, scope_count);
+        scope_pass(n->else_body, scope_count);
+    } break;
+
     case NT_FUNC_CALL: {
         for (int i = 0; i < n->args_count; i++) {
             scope_pass(n->args[i], scope_count);
@@ -494,7 +534,7 @@ void scope_pass(node_t *n, int *scope_count)
 
 void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
 {
-    assert(NT_COUNT == 10);
+    assert(NT_COUNT == 11);
 
     if (!n) return;
 
@@ -560,6 +600,12 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
     case NT_WHILE: {
         var_pass(n->while_cond, stack_offset, scope_ids, size);
         var_pass(n->while_body, stack_offset, scope_ids, size);
+    } break;
+
+    case NT_IF: {
+        var_pass(n->if_cond, stack_offset, scope_ids, size);
+        var_pass(n->if_body, stack_offset, scope_ids, size);
+        var_pass(n->else_body, stack_offset, scope_ids, size);
     } break;
 
     case NT_FUNC_CALL: {
@@ -659,7 +705,7 @@ storage_t make_mutable(storage_t st, int *registers_used)
 
 storage_t codegen(node_t *n, int *registers_used)
 {
-    assert(NT_COUNT == 10);
+    assert(NT_COUNT == 11);
 
     switch (n->type) {
     case NT_DECL:
@@ -758,7 +804,6 @@ storage_t codegen(node_t *n, int *registers_used)
 
         storage_t cond_init = codegen(n->while_cond, registers_used);
         assert(cond_init.type != ST_NONE);
-
         storage_t cond_mut = make_mutable(cond_init, registers_used);
 
         printf("\tcmpl\t$0, ");
@@ -770,6 +815,32 @@ storage_t codegen(node_t *n, int *registers_used)
 
         printf("\tjmp\t.while_start_%u\n", ident);
         printf(".while_end_%u:\n", ident);
+
+        return (storage_t){ .type = ST_NONE };
+    } break;
+
+    case NT_IF: {
+        unsigned ident = rand(); // TODO: can possibly collide
+
+        storage_t cond_init = codegen(n->if_cond, registers_used);
+        assert(cond_init.type != ST_NONE);
+        storage_t cond_mut = make_mutable(cond_init, registers_used);
+
+        printf("\tcmpl\t$0, ");
+        unwrap_storage(cond_mut);
+        printf("\n");
+        printf("\tjz\t.if_end_%d\n", ident);
+        codegen(n->if_body, registers_used);
+        printf(".if_end_%d:\n", ident);
+
+        if (n->else_body) {
+            printf("\tcmpl\t$0, ");
+            unwrap_storage(cond_mut);
+            printf("\n");
+            printf("\tjnz\t.else_end_%d\n", ident);
+            codegen(n->else_body, registers_used);
+            printf(".else_end_%d:\n", ident);
+        }
 
         return (storage_t){ .type = ST_NONE };
     } break;
