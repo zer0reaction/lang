@@ -9,7 +9,8 @@
 #define ARENA_IMPLEMENTATION
 #include "arena.h"
 
-#define SCOPE_IDS_SIZE 32
+#define SCOPE_IDS_BUF_SIZE 32
+#define IDENT_NAME_MAX_LEN 32
 
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
 
@@ -30,10 +31,10 @@ typedef enum{
     TT_EQUAL,
     TT_PLUS,
     TT_MINUS,
-    TT_L,
-    TT_W,
-    TT_I,
-    TT_E,
+    TT_LET,
+    TT_WHILE,
+    TT_IF,
+    TT_ELSE,
     TT_ROUND_OPEN,
     TT_ROUND_CLOSE,
     TT_CURLY_OPEN,
@@ -44,13 +45,13 @@ typedef enum{
 typedef struct{
     tt_t type;
     union {
-        char ident_name;
+        char ident_name[IDENT_NAME_MAX_LEN + 1];
         int int_value;
     };
 }token_t;
 
 typedef struct{
-    char ident_name;
+    char ident_name[IDENT_NAME_MAX_LEN + 1];
     int stack_offset;
     int scope_id;
 }symbol_t;
@@ -78,7 +79,7 @@ struct node_t{
 
     union {
         int int_value;
-        char var_name;
+        char var_name[IDENT_NAME_MAX_LEN + 1];
         struct {
             node_t *while_cond;
             node_t *while_body;
@@ -97,7 +98,7 @@ struct node_t{
             node_t *rval;
         };
         struct {
-            char func_name;
+            char func_name[IDENT_NAME_MAX_LEN + 1];
             node_t *args[FUNCTION_ARGS_MAX];
             int args_count;
             int allign_offset;
@@ -131,6 +132,43 @@ token_t *tokenize(char *s, int len)
     assert(TT_COUNT == 14);
 
     while (i < len) {
+        if (len - i >= (int)strlen("let") && strncmp(&s[i], "let", (int)strlen("let")) == 0) {
+            token_t t = {0};
+            t.type = TT_LET;
+            arrput(ts, t);
+            i += strlen("let");
+        }
+        else if (len - i >= (int)strlen("while") && strncmp(&s[i], "while", (int)strlen("while")) == 0) {
+            token_t t = {0};
+            t.type = TT_WHILE;
+            arrput(ts, t);
+            i += strlen("while");
+        }
+        else if (len - i >= (int)strlen("if") && strncmp(&s[i], "if", (int)strlen("if")) == 0) {
+            token_t t = {0};
+            t.type = TT_IF;
+            arrput(ts, t);
+            i += strlen("if");
+        }
+        else if (len - i >= (int)strlen("else") && strncmp(&s[i], "else", (int)strlen("else")) == 0) {
+            token_t t = {0};
+            t.type = TT_ELSE;
+            arrput(ts, t);
+            i += strlen("else");
+        }
+        else if (s[i] >= 'a' && s[i] <= 'z') {
+            token_t t = {0};
+            t.type = TT_IDENT;
+
+            int name_len = 0;
+            while (len - i > 0 && ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_')) {
+                assert(name_len < IDENT_NAME_MAX_LEN);
+                t.ident_name[name_len++] = s[i++];
+            }
+
+            arrput(ts, t);
+        }
+
         switch (s[i]) {
         case ' ':
         case '\t':
@@ -187,34 +225,6 @@ token_t *tokenize(char *s, int len)
             i += 1;
         } break;
 
-        case 'L': {
-            token_t t = {0};
-            t.type = TT_L;
-            arrput(ts, t);
-            i += 1;
-        } break;
-
-        case 'W': {
-            token_t t = {0};
-            t.type = TT_W;
-            arrput(ts, t);
-            i += 1;
-        } break;
-
-        case 'I': {
-            token_t t = {0};
-            t.type = TT_I;
-            arrput(ts, t);
-            i += 1;
-        } break;
-
-        case 'E': {
-            token_t t = {0};
-            t.type = TT_E;
-            arrput(ts, t);
-            i += 1;
-        } break;
-
         case '0':
         case '1':
         case '2':
@@ -239,13 +249,8 @@ token_t *tokenize(char *s, int len)
             arrput(ts, t);
         } break;
 
-        default: {
-            token_t t = {0};
-            t.type = TT_IDENT;
-            t.ident_name = s[i];
-            arrput(ts, t);
-            i += 1;
-        } break;
+        default:
+            assert(0 && "unexpected character");
         }
     }
 
@@ -259,7 +264,7 @@ void print_tokens(token_t *ts)
     for (int i = 0; i < arrlen(ts); i++) {
         switch (ts[i].type) {
         case TT_IDENT: {
-            printf("`%c` ", ts[i].ident_name);
+            printf("`%s` ", ts[i].ident_name);
         } break;
 
         case TT_INT: {
@@ -319,29 +324,29 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         *eaten += 1;
     } break;
 
-    case TT_L: {
+    case TT_LET: {
         assert(arrlen(ts) - *eaten >= 2);
         assert(ts[*eaten + 1].type == TT_IDENT);
 
         n->type = NT_DECL;
-        n->var_name = ts[*eaten + 1].ident_name;
+        strcpy(n->var_name, ts[*eaten + 1].ident_name);
         *eaten += 2;
     } break;
 
-    case TT_W: {
+    case TT_WHILE: {
         n->type = NT_WHILE;
         *eaten += 1;
         n->while_cond = parse(ts, eaten, a);
         n->while_body = parse(ts, eaten, a);
     } break;
 
-    case TT_I: {
+    case TT_IF: {
         n->type = NT_IF;
         *eaten += 1;
         n->if_cond = parse(ts, eaten, a);
         n->if_body = parse(ts, eaten, a);
 
-        if (*eaten < arrlen(ts) && ts[*eaten].type == TT_E) {
+        if (*eaten < arrlen(ts) && ts[*eaten].type == TT_ELSE) {
             *eaten += 1;
             n->else_body = parse(ts, eaten, a);
         }
@@ -350,7 +355,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
     case TT_IDENT: {
         if (arrlen(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
             n->type = NT_FUNC_CALL;
-            n->func_name = ts[*eaten].ident_name;
+            strcpy(n->func_name, ts[*eaten].ident_name);
             *eaten += 2;
 
             while (ts[*eaten].type != TT_ROUND_CLOSE) {
@@ -363,7 +368,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
             *eaten += 1;
         } else {
             n->type = NT_VAR;
-            n->var_name = ts[*eaten].ident_name;
+            strcpy(n->var_name, ts[*eaten].ident_name);
             *eaten += 1;
         }
     } break;
@@ -428,7 +433,7 @@ void print_ast(node_t *n)
     } break;
 
     case NT_VAR: {
-        printf("[%d]`%c`@%d ", n->table_id, table[n->table_id].ident_name,
+        printf("[%d]`%s`@%d ", n->table_id, table[n->table_id].ident_name,
                table[n->table_id].stack_offset);
     } break;
 
@@ -457,7 +462,7 @@ void print_ast(node_t *n)
     } break;
 
     case NT_FUNC_CALL: {
-        printf("%c(%d)(", n->func_name, n->allign_offset);
+        printf("%s(%d)(", n->func_name, n->allign_offset);
         for (int i = 0; i < n->args_count; i++) {
             print_ast(n->args[i]);
         }
@@ -471,7 +476,7 @@ void print_ast(node_t *n)
     } break;
 
     case NT_DECL: {
-        printf("Let[%d]`%c`@%d ", n->table_id, table[n->table_id].ident_name,
+        printf("Let[%d]`%s`@%d ", n->table_id, table[n->table_id].ident_name,
                table[n->table_id].stack_offset);
     } break;
 
@@ -555,7 +560,7 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
         assert(!in_current_scope);
 
         symbol_t sym = {0};
-        sym.ident_name = n->var_name;
+        strcpy(sym.ident_name, n->var_name);
         sym.stack_offset = (*stack_offset -= 4);
         sym.scope_id = current_scope_id;
         arrput(table, sym);
@@ -566,7 +571,7 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
         bool visible = false;
         int table_id = 0;
         for (int i = 0; i < arrlen(table); i++) {
-            if (n->var_name == table[i].ident_name) {
+            if (strcmp(n->var_name, table[i].ident_name) == 0) {
                 for (int j = size - 1; j >= 0; j--) {
                     if (scope_ids[j] == table[i].scope_id) {
                         visible = true;
@@ -581,8 +586,8 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
     } break;
 
     case NT_SCOPE: {
-        assert(size < SCOPE_IDS_SIZE);
-        int new_scope_ids[SCOPE_IDS_SIZE] = {0};
+        assert(size < SCOPE_IDS_BUF_SIZE);
+        int new_scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
         for (int i = 0; i < size; i++) {
             new_scope_ids[i] = scope_ids[i];
         }
@@ -780,7 +785,7 @@ storage_t codegen(node_t *n, int *registers_used)
         if (n->allign_offset != 0) {
             printf("\tsubq\t$%d, %%rsp\n", n->allign_offset);
         }
-        printf("\tcall\t%c\n", n->func_name);
+        printf("\tcall\t%s\n", n->func_name);
         if (n->allign_offset != 0) {
             printf("\taddq\t$%d, %%rsp\n", n->allign_offset); // TODO: refactor, lame
         }
@@ -897,7 +902,7 @@ int main(int argc, char *argv[])
     scope_pass(root, &scope_count);
 
     int stack_offset = 0;
-    int scope_ids[SCOPE_IDS_SIZE] = {0};
+    int scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
     var_pass(root, &stack_offset, scope_ids, 1);
 
 /*
@@ -909,7 +914,7 @@ int main(int argc, char *argv[])
     printf(".globl _start\n");
     printf("\n");
 
-    printf("p:\n");
+    printf("putchar:\n");
     printf("\tpushq\t%%rbp\n");
     printf("\tmovq\t%%rsp, %%rbp\n");
 
