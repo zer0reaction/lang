@@ -41,7 +41,8 @@ typedef int64_t s64;
 typedef enum{
     TT_EMPTY = 0,
     TT_IDENT,
-    TT_INT,
+    TT_INT_LITERAL,
+    TT_CHAR_LITERAL,
     TT_EQUAL,
     TT_CMP_EQ,
     TT_CMP_NEQ,
@@ -92,6 +93,7 @@ typedef enum{
     NT_FUNC_CALL,
     NT_SCOPE,
     NT_INT,
+    NT_CHAR,
     NT_SUM,
     NT_SUB,
     NT_COUNT
@@ -155,7 +157,7 @@ token_t *tokenize(const char *s, u64 len)
     u64 i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 20);
+    assert(TT_COUNT == 21);
 
     while (i < len) {
         if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
@@ -163,6 +165,41 @@ token_t *tokenize(const char *s, u64 len)
         }
 
         /* multichar tokens */
+        else if (s[i] == '\'') {
+            assert(len - i >= 3);
+            i += 1;
+
+            token_t t = {0};
+            t.type = TT_CHAR_LITERAL;
+
+            if (s[i] == '\\') {
+                assert(len - i >= 3 && s[i + 2] == '\'');
+                i += 1;
+                // TODO: add more escape characters
+                switch (s[i]) {
+                case 't':
+                    t.int_value = '\t';
+                    break;
+                case 'n':
+                    t.int_value = '\n';
+                    break;
+                case '\\':
+                    t.int_value = '\\';
+                    break;
+                case '\'':
+                    t.int_value = '\'';
+                    break;
+                default:
+                    assert(0 && "unrecognized escape sequence");
+                }
+                i += 2;
+            } else {
+                t.int_value = (s32)s[i];
+                i += 2;
+            }
+
+            arrput(ts, t);
+        }
         else if (len - i >= strlen("let") && strncmp(&s[i], "let", strlen("let")) == 0) {
             token_t t = {0};
             t.type = TT_LET;
@@ -278,7 +315,7 @@ token_t *tokenize(const char *s, u64 len)
             }
 
             token_t t = {0};
-            t.type = TT_INT;
+            t.type = TT_INT_LITERAL;
             t.int_value = value;
 
             arrput(ts, t);
@@ -312,7 +349,7 @@ void print_tokens(const token_t *ts)
             printf("`%s` ", ts[i].ident_name);
         } break;
 
-        case TT_INT: {
+        case TT_INT_LITERAL: {
             printf("<%d> ", ts[i].int_value);
         } break;
 
@@ -354,8 +391,8 @@ void print_tokens(const token_t *ts)
 
 node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 {
-    assert(TT_COUNT == 20);
-    assert(NT_COUNT == 17);
+    assert(TT_COUNT == 21);
+    assert(NT_COUNT == 18);
 
     assert(*eaten < arrlenu(ts));
 
@@ -363,8 +400,14 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
     memset(n, 0, sizeof(*n));
 
     switch (ts[*eaten].type) {
-    case TT_INT: {
+    case TT_INT_LITERAL: {
         n->type = NT_INT;
+        n->int_value = ts[*eaten].int_value;
+        *eaten += 1;
+    } break;
+
+    case TT_CHAR_LITERAL: {
+        n->type = NT_CHAR;
         n->int_value = ts[*eaten].int_value;
         *eaten += 1;
     } break;
@@ -583,7 +626,7 @@ void print_ast(const node_t *n)
 
 void scope_pass(node_t *n, u32 *scope_count)
 {
-    assert(NT_COUNT == 17);
+    assert(NT_COUNT == 18);
 
     if (!n) return;
 
@@ -632,7 +675,7 @@ void scope_pass(node_t *n, u32 *scope_count)
 
 void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
 {
-    assert(NT_COUNT == 17);
+    assert(NT_COUNT == 18);
 
     if (!n) return;
 
@@ -808,7 +851,7 @@ storage_t make_mutable(storage_t st, u8 *registers_used)
 
 storage_t codegen(const node_t *n, u8 *registers_used)
 {
-    assert(NT_COUNT == 17);
+    assert(NT_COUNT == 18);
 
     switch (n->type) {
     case NT_DECL:
@@ -816,6 +859,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
         return (storage_t){ .table_id = n->table_id, .type = ST_STACK };
     } break;
 
+    case NT_CHAR:
     case NT_INT: {
         return (storage_t){ .type = ST_IMMEDIATE, .int_value = n->int_value };
     } break;
