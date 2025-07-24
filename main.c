@@ -150,7 +150,10 @@ token_t *tokenize(char *s, u64 len)
     assert(TT_COUNT == 16);
 
     while (i < len) {
-        if (len - i >= strlen("let") && strncmp(&s[i], "let", strlen("let")) == 0) {
+        if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
+            i += 1;
+        }
+        else if (len - i >= strlen("let") && strncmp(&s[i], "let", strlen("let")) == 0) {
             token_t t = {0};
             t.type = TT_LET;
             arrput(ts, t);
@@ -186,85 +189,49 @@ token_t *tokenize(char *s, u64 len)
             arrput(ts, t);
             i += strlen("!=");
         }
-        else if (s[i] >= 'a' && s[i] <= 'z') {
-            token_t t = {0};
-            t.type = TT_IDENT;
-
-            u32 name_len = 0;
-            while (len - i > 0 && ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_')) {
-                assert(name_len < IDENT_NAME_MAX_LEN);
-                t.ident_name[name_len++] = s[i++];
-            }
-
-            arrput(ts, t);
-        }
-
-        switch (s[i]) {
-        case ' ':
-        case '\t':
-        case '\n': {
-            i += 1;
-        } break;
-
-        case '=': {
+        else if (len - i >= strlen("=") && strncmp(&s[i], "=", strlen("=")) == 0) {
             token_t t = {0};
             t.type = TT_EQUAL;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case '+': {
+            i += strlen("=");
+        }
+        else if (len - i >= strlen("+") && strncmp(&s[i], "+", strlen("+")) == 0) {
             token_t t = {0};
             t.type = TT_PLUS;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case '-': {
+            i += strlen("+");
+        }
+        else if (len - i >= strlen("-") && strncmp(&s[i], "-", strlen("-")) == 0) {
             token_t t = {0};
             t.type = TT_MINUS;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case '(': {
+            i += strlen("-");
+        }
+        else if (len - i >= strlen("(") && strncmp(&s[i], "(", strlen("(")) == 0) {
             token_t t = {0};
             t.type = TT_ROUND_OPEN;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case ')': {
+            i += strlen("(");
+        }
+        else if (len - i >= strlen(")") && strncmp(&s[i], ")", strlen(")")) == 0) {
             token_t t = {0};
             t.type = TT_ROUND_CLOSE;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case '{': {
+            i += strlen(")");
+        }
+        else if (len - i >= strlen("{") && strncmp(&s[i], "{", strlen("{")) == 0) {
             token_t t = {0};
             t.type = TT_CURLY_OPEN;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case '}': {
+            i += strlen("{");
+        }
+        else if (len - i >= strlen("}") && strncmp(&s[i], "}", strlen("}")) == 0) {
             token_t t = {0};
             t.type = TT_CURLY_CLOSE;
             arrput(ts, t);
-            i += 1;
-        } break;
-
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9': {
+            i += strlen("}");
+        }
+        else if (s[i] >= '0' && s[i] <= '9') {
             s32 value = 0;
             while (i < len && s[i] >= '0' && s[i] <= '9') {
                 value *= 10;
@@ -277,11 +244,20 @@ token_t *tokenize(char *s, u64 len)
             t.int_value = value;
 
             arrput(ts, t);
-        } break;
-
-        default:
-            assert(0 && "unexpected character");
         }
+        else if ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_') {
+            token_t t = {0};
+            t.type = TT_IDENT;
+
+            u32 name_len = 0;
+            while (len - i > 0 && ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_')) {
+                assert(name_len < IDENT_NAME_MAX_LEN);
+                t.ident_name[name_len++] = s[i++];
+            }
+
+            arrput(ts, t);
+        }
+        else assert(0 && "unexpected character");
     }
 
     return ts;
