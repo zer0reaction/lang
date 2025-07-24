@@ -843,7 +843,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
 
         storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-        printf("\tcmp\t");
+        printf("\tcmpl\t");
         unwrap_storage(rval);
         printf(", ");
         unwrap_storage(lval_reg);
@@ -863,7 +863,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
 
         storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-        printf("\tcmp\t");
+        printf("\tcmpl\t");
         unwrap_storage(rval);
         printf(", ");
         unwrap_storage(lval_reg);
@@ -883,7 +883,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
 
         storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-        printf("\tcmp\t");
+        printf("\tcmpl\t");
         unwrap_storage(rval);
         printf(", ");
         unwrap_storage(lval_reg);
@@ -903,7 +903,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
 
         storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-        printf("\tcmp\t");
+        printf("\tcmpl\t");
         unwrap_storage(rval);
         printf(", ");
         unwrap_storage(lval_reg);
@@ -923,7 +923,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
 
         storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-        printf("\tcmp\t");
+        printf("\tcmpl\t");
         unwrap_storage(rval);
         printf(", ");
         unwrap_storage(lval_reg);
@@ -943,7 +943,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
 
         storage_t lval_reg = move_to_register(lval_init, registers_used);
 
-        printf("\tcmp\t");
+        printf("\tcmpl\t");
         unwrap_storage(rval);
         printf(", ");
         unwrap_storage(lval_reg);
