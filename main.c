@@ -152,6 +152,8 @@ typedef struct{
 
 static symbol_t *table = NULL;
 
+#include "testing.c" // weird, but ok
+
 token_t *tokenize(const char *s, u64 len)
 {
     u64 i = 0;
@@ -339,56 +341,6 @@ token_t *tokenize(const char *s, u64 len)
     return ts;
 }
 
-void print_tokens(const token_t *ts)
-{
-    assert(TT_COUNT == 10);
-
-    for (u64 i = 0; i < arrlenu(ts); i++) {
-        switch (ts[i].type) {
-        case TT_IDENT: {
-            printf("`%s` ", ts[i].ident_name);
-        } break;
-
-        case TT_INT_LITERAL: {
-            printf("<%d> ", ts[i].int_value);
-        } break;
-
-        case TT_EQUAL: {
-            printf("= ");
-        } break;
-
-        case TT_PLUS: {
-            printf("+ ");
-        } break;
-
-        case TT_MINUS: {
-            printf("- ");
-        } break;
-
-        case TT_ROUND_OPEN: {
-            printf("( ");
-        } break;
-
-        case TT_ROUND_CLOSE: {
-            printf(") ");
-        } break;
-
-        case TT_CURLY_OPEN: {
-            printf("{ ");
-        } break;
-
-        case TT_CURLY_CLOSE: {
-            printf("} ");
-        } break;
-
-        default: {
-            assert(0 && "unknown token");
-        } break;
-        }
-    }
-    printf("\n");
-}
-
 node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 {
     assert(TT_COUNT == 21);
@@ -549,79 +501,6 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
     }
 
     return n;
-}
-
-void print_ast(const node_t *n)
-{
-    assert(NT_COUNT == 10);
-
-    if (n == NULL) return;
-
-    switch (n->type) {
-    case NT_INT: {
-        printf("<%d>", n->int_value);
-    } break;
-
-    case NT_VAR: {
-        printf("[%d]`%s`@%d ", n->table_id, table[n->table_id].ident_name,
-               table[n->table_id].stack_offset);
-    } break;
-
-    case NT_ASSIGN: {
-        printf("(= ");
-        print_ast(n->lval);
-        printf(" ");
-        print_ast(n->rval);
-        printf(") ");
-    } break;
-
-    case NT_SUM: {
-        printf("(+ ");
-        print_ast(n->lval);
-        printf(" ");
-        print_ast(n->rval);
-        printf(") ");
-    } break;
-
-    case NT_SUB: {
-        printf("(- ");
-        print_ast(n->lval);
-        printf(" ");
-        print_ast(n->rval);
-        printf(") ");
-    } break;
-
-    case NT_FUNC_CALL: {
-        printf("%s(%d)(", n->func_name, n->allign_sub);
-        for (u64 i = 0; i < n->args_count; i++) {
-            print_ast(n->args[i]);
-        }
-        printf(") ");
-    } break;
-
-    case NT_SCOPE: {
-        printf("{(%d) ", n->scope_id);
-        print_ast(n->scope_start);
-        printf("}\n");
-    } break;
-
-    case NT_DECL: {
-        printf("Let[%d]`%s`@%d ", n->table_id, table[n->table_id].ident_name,
-               table[n->table_id].stack_offset);
-    } break;
-
-    case NT_WHILE: {
-        printf("While");
-        print_ast(n->while_cond);
-        print_ast(n->while_body);
-    } break;
-
-    default: {
-        assert(0 && "unexpected node");
-    } break;
-    }
-
-    print_ast(n->next);
 }
 
 void scope_pass(node_t *n, u32 *scope_count)
@@ -1167,6 +1046,13 @@ int main(int argc, char *argv[])
     s32 stack_offset = 0;
     u32 scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
     var_pass(root, &stack_offset, scope_ids, 1);
+
+    /*
+    print_tokens(ts);
+    printf("\n");
+    print_ast(root);
+    printf("\n\n");
+    */
 
     printf(".section .text\n");
     printf(".globl _start\n");
