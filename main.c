@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
@@ -27,6 +28,16 @@ static char *argument_registers[] = {
 };
 #define FUNCTION_ARGS_MAX (sizeof(argument_registers) / sizeof(*argument_registers))
 
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+
 typedef enum{
     TT_EMPTY = 0,
     TT_IDENT,
@@ -51,14 +62,14 @@ typedef struct{
     tt_t type;
     union {
         char ident_name[IDENT_NAME_MAX_LEN + 1];
-        int int_value;
+        s32 int_value;
     };
 }token_t;
 
 typedef struct{
     char ident_name[IDENT_NAME_MAX_LEN + 1];
-    int stack_offset;
-    int scope_id;
+    s32 stack_offset; /* negative value */
+    u32 scope_id;
 }symbol_t;
 
 typedef enum{
@@ -81,11 +92,11 @@ typedef enum{
 typedef struct node_t node_t;
 struct node_t{
     nt_t type;
-    int table_id;
+    u32 table_id;
     node_t *next;
 
     union {
-        int int_value;
+        s32 int_value;
         char var_name[IDENT_NAME_MAX_LEN + 1];
         struct {
             node_t *while_cond;
@@ -97,7 +108,7 @@ struct node_t{
             node_t *else_body;
         };
         struct {
-            int scope_id;
+            u32 scope_id;
             node_t *scope_start;
         };
         struct {
@@ -107,8 +118,8 @@ struct node_t{
         struct {
             char func_name[IDENT_NAME_MAX_LEN + 1];
             node_t *args[FUNCTION_ARGS_MAX];
-            int args_count;
-            int allign_offset;
+            u8 args_count;
+            u8 allign_sub; /* positive value, subtracted from rsp before call */
         };
     };
 };
@@ -123,53 +134,53 @@ typedef enum{
 typedef struct{
     st_t type;
     union {
-        int table_id;
-        int register_id;
-        int int_value;
+        u32 table_id;
+        u8 register_id;
+        s32 int_value;
     };
 }storage_t;
 
 static symbol_t *table = NULL;
 
-token_t *tokenize(char *s, int len)
+token_t *tokenize(char *s, u64 len)
 {
-    int i = 0;
+    u64 i = 0;
     token_t *ts = NULL;
 
     assert(TT_COUNT == 16);
 
     while (i < len) {
-        if (len - i >= (int)strlen("let") && strncmp(&s[i], "let", (int)strlen("let")) == 0) {
+        if (len - i >= strlen("let") && strncmp(&s[i], "let", strlen("let")) == 0) {
             token_t t = {0};
             t.type = TT_LET;
             arrput(ts, t);
             i += strlen("let");
         }
-        else if (len - i >= (int)strlen("while") && strncmp(&s[i], "while", (int)strlen("while")) == 0) {
+        else if (len - i >= strlen("while") && strncmp(&s[i], "while", strlen("while")) == 0) {
             token_t t = {0};
             t.type = TT_WHILE;
             arrput(ts, t);
             i += strlen("while");
         }
-        else if (len - i >= (int)strlen("if") && strncmp(&s[i], "if", (int)strlen("if")) == 0) {
+        else if (len - i >= strlen("if") && strncmp(&s[i], "if", strlen("if")) == 0) {
             token_t t = {0};
             t.type = TT_IF;
             arrput(ts, t);
             i += strlen("if");
         }
-        else if (len - i >= (int)strlen("else") && strncmp(&s[i], "else", (int)strlen("else")) == 0) {
+        else if (len - i >= strlen("else") && strncmp(&s[i], "else", strlen("else")) == 0) {
             token_t t = {0};
             t.type = TT_ELSE;
             arrput(ts, t);
             i += strlen("else");
         }
-        else if (len - i >= (int)strlen("==") && strncmp(&s[i], "==", (int)strlen("==")) == 0) {
+        else if (len - i >= strlen("==") && strncmp(&s[i], "==", strlen("==")) == 0) {
             token_t t = {0};
             t.type = TT_CMP_EQ;
             arrput(ts, t);
             i += strlen("==");
         }
-        else if (len - i >= (int)strlen("!=") && strncmp(&s[i], "!=", (int)strlen("!=")) == 0) {
+        else if (len - i >= strlen("!=") && strncmp(&s[i], "!=", strlen("!=")) == 0) {
             token_t t = {0};
             t.type = TT_CMP_NEQ;
             arrput(ts, t);
@@ -179,7 +190,7 @@ token_t *tokenize(char *s, int len)
             token_t t = {0};
             t.type = TT_IDENT;
 
-            int name_len = 0;
+            u32 name_len = 0;
             while (len - i > 0 && ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_')) {
                 assert(name_len < IDENT_NAME_MAX_LEN);
                 t.ident_name[name_len++] = s[i++];
@@ -254,7 +265,7 @@ token_t *tokenize(char *s, int len)
         case '7':
         case '8':
         case '9': {
-            int value = 0;
+            s32 value = 0;
             while (i < len && s[i] >= '0' && s[i] <= '9') {
                 value *= 10;
                 value += s[i] - '0';
@@ -280,7 +291,7 @@ void print_tokens(token_t *ts)
 {
     assert(TT_COUNT == 10);
 
-    for (int i = 0; i < arrlen(ts); i++) {
+    for (u64 i = 0; i < arrlenu(ts); i++) {
         switch (ts[i].type) {
         case TT_IDENT: {
             printf("`%s` ", ts[i].ident_name);
@@ -326,12 +337,12 @@ void print_tokens(token_t *ts)
     printf("\n");
 }
 
-node_t *parse(token_t *ts, int *eaten, Arena *a)
+node_t *parse(token_t *ts, u32 *eaten, Arena *a)
 {
     assert(TT_COUNT == 16);
     assert(NT_COUNT == 13);
 
-    assert(*eaten < arrlen(ts));
+    assert(*eaten < arrlenu(ts));
 
     node_t *n = arena_alloc(a, sizeof(*n));
     memset(n, 0, sizeof(*n));
@@ -344,7 +355,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
     } break;
 
     case TT_LET: {
-        assert(arrlen(ts) - *eaten >= 2);
+        assert(arrlenu(ts) - *eaten >= 2);
         assert(ts[*eaten + 1].type == TT_IDENT);
 
         n->type = NT_DECL;
@@ -365,21 +376,21 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         n->if_cond = parse(ts, eaten, a);
         n->if_body = parse(ts, eaten, a);
 
-        if (*eaten < arrlen(ts) && ts[*eaten].type == TT_ELSE) {
+        if (*eaten < arrlenu(ts) && ts[*eaten].type == TT_ELSE) {
             *eaten += 1;
             n->else_body = parse(ts, eaten, a);
         }
     } break;
 
     case TT_IDENT: {
-        if (arrlen(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
+        if (arrlenu(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
             n->type = NT_FUNC_CALL;
             strcpy(n->func_name, ts[*eaten].ident_name);
             *eaten += 2;
 
             while (ts[*eaten].type != TT_ROUND_CLOSE) {
-                assert(arrlen(ts) - *eaten > 1);
-                assert(n->args_count < (int)FUNCTION_ARGS_MAX);
+                assert(arrlenu(ts) - *eaten > 1);
+                assert(n->args_count < FUNCTION_ARGS_MAX);
                 node_t *arg = parse(ts, eaten, a);
                 n->args[n->args_count++] = arg;
             }
@@ -432,7 +443,7 @@ node_t *parse(token_t *ts, int *eaten, Arena *a)
         *eaten += 1;
         node_t *current = NULL;
         while (ts[*eaten].type != TT_CURLY_CLOSE) {
-            assert(arrlen(ts) - *eaten > 1);
+            assert(arrlenu(ts) - *eaten > 1);
             node_t *node = parse(ts, eaten, a);
             if (!n->scope_start) {
                 n->scope_start = node;
@@ -495,8 +506,8 @@ void print_ast(node_t *n)
     } break;
 
     case NT_FUNC_CALL: {
-        printf("%s(%d)(", n->func_name, n->allign_offset);
-        for (int i = 0; i < n->args_count; i++) {
+        printf("%s(%d)(", n->func_name, n->allign_sub);
+        for (u64 i = 0; i < n->args_count; i++) {
             print_ast(n->args[i]);
         }
         printf(") ");
@@ -527,7 +538,7 @@ void print_ast(node_t *n)
     print_ast(n->next);
 }
 
-void scope_pass(node_t *n, int *scope_count)
+void scope_pass(node_t *n, u32 *scope_count)
 {
     assert(NT_COUNT == 13);
 
@@ -560,7 +571,7 @@ void scope_pass(node_t *n, int *scope_count)
     } break;
 
     case NT_FUNC_CALL: {
-        for (int i = 0; i < n->args_count; i++) {
+        for (u64 i = 0; i < n->args_count; i++) {
             scope_pass(n->args[i], scope_count);
         }
     } break;
@@ -572,7 +583,7 @@ void scope_pass(node_t *n, int *scope_count)
     scope_pass(n->next, scope_count);
 }
 
-void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
+void var_pass(node_t *n, s32 *stack_offset, u32 scope_ids[], u32 size)
 {
     assert(NT_COUNT == 13);
 
@@ -582,11 +593,10 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
     case NT_DECL: {
         assert(size >= 1);
         bool in_current_scope = false;
-        int current_scope_id = scope_ids[size - 1];
+        u32 current_scope_id = scope_ids[size - 1];
 
-        for (int i = 0; i < arrlen(table); i++) {
-            if (table[i].scope_id == current_scope_id &&
-                n->var_name == table[i].ident_name) {
+        for (u64 i = 0; i < arrlenu(table); i++) {
+            if (table[i].scope_id == current_scope_id && n->var_name == table[i].ident_name) {
                 in_current_scope = true;
                 break;
             }
@@ -599,15 +609,15 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
         sym.stack_offset = (*stack_offset -= 4);
         sym.scope_id = current_scope_id;
         arrput(table, sym);
-        n->table_id = arrlen(table) - 1;
+        n->table_id = arrlenu(table) - 1;
     } break;
 
     case NT_VAR: {
         bool visible = false;
-        int table_id = 0;
-        for (int i = 0; i < arrlen(table); i++) {
+        u32 table_id = 0;
+        for (u64 i = 0; i < arrlenu(table); i++) {
             if (strcmp(n->var_name, table[i].ident_name) == 0) {
-                for (int j = size - 1; j >= 0; j--) {
+                for (s64 j = size - 1; j >= 0; j--) {
                     if (scope_ids[j] == table[i].scope_id) {
                         visible = true;
                         table_id = i;
@@ -622,8 +632,8 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
 
     case NT_SCOPE: {
         assert(size < SCOPE_IDS_BUF_SIZE);
-        int new_scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
-        for (int i = 0; i < size; i++) {
+        u32 new_scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
+        for (u64 i = 0; i < size; i++) {
             new_scope_ids[i] = scope_ids[i];
         }
         new_scope_ids[size] = n->scope_id;
@@ -651,9 +661,9 @@ void var_pass(node_t *n, int *stack_offset, int scope_ids[], int size)
     } break;
 
     case NT_FUNC_CALL: {
-        n->allign_offset = ABSOLUTE(*stack_offset) +
-                           (16 - ABSOLUTE(*stack_offset) % 16) % 16;
-        for (int i = 0; i < n->args_count; i++) {
+        // TODO: refactor, lame
+        n->allign_sub = ABSOLUTE(*stack_offset) + (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+        for (u64 i = 0; i < n->args_count; i++) {
             var_pass(n->args[i], stack_offset, scope_ids, size);
         }
     } break;
@@ -691,7 +701,7 @@ void unwrap_storage(storage_t st)
   register  -> do nothing
   stack     -> move to register
 */
-storage_t move_to_register(storage_t st, int *registers_used)
+storage_t move_to_register(storage_t st, u8 *registers_used)
 {
     switch (st.type) {
     case ST_REGISTER: {
@@ -699,15 +709,15 @@ storage_t move_to_register(storage_t st, int *registers_used)
     } break;
 
     case ST_IMMEDIATE: {
-        assert(*registers_used < (int)REGISTERS_COUNT);
-        int register_id = (*registers_used)++;
+        assert(*registers_used < REGISTERS_COUNT);
+        u8 register_id = (*registers_used)++;
         printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_4b_registers[register_id]);
         return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
     } break;
 
     case ST_STACK: {
-        assert(*registers_used < (int)REGISTERS_COUNT);
-        int register_id = (*registers_used)++;
+        assert(*registers_used < REGISTERS_COUNT);
+        u8 register_id = (*registers_used)++;
         printf("\tmovl\t%d(%%rbp), %%%s\n", table[st.table_id].stack_offset, scratch_4b_registers[register_id]);
         return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
     } break;
@@ -722,12 +732,12 @@ storage_t move_to_register(storage_t st, int *registers_used)
   register  -> do nothing
   stack     -> do nothing
 */
-storage_t make_mutable(storage_t st, int *registers_used)
+storage_t make_mutable(storage_t st, u8 *registers_used)
 {
     switch (st.type) {
     case ST_IMMEDIATE: {
-        assert(*registers_used < (int)REGISTERS_COUNT);
-        int register_id = (*registers_used)++;
+        assert(*registers_used < REGISTERS_COUNT);
+        u8 register_id = (*registers_used)++;
         printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_4b_registers[register_id]);
         return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
     } break;
@@ -745,7 +755,7 @@ storage_t make_mutable(storage_t st, int *registers_used)
     }
 }
 
-storage_t codegen(node_t *n, int *registers_used)
+storage_t codegen(node_t *n, u8 *registers_used)
 {
     assert(NT_COUNT == 13);
 
@@ -848,9 +858,9 @@ storage_t codegen(node_t *n, int *registers_used)
     } break;
 
     case NT_FUNC_CALL: {
-        int storage_count = n->args_count;
+        u8 storage_count = n->args_count;
 
-        for (int i = 0; i < storage_count; i++) {
+        for (u64 i = 0; i < storage_count; i++) {
             storage_t st = codegen(n->args[i], registers_used);
             assert(st.type != ST_NONE);
 
@@ -859,12 +869,12 @@ storage_t codegen(node_t *n, int *registers_used)
             printf(", %%%s\n", argument_registers[i]);
         }
 
-        if (n->allign_offset != 0) {
-            printf("\tsubq\t$%d, %%rsp\n", n->allign_offset);
+        if (n->allign_sub > 0) {
+            printf("\tsubq\t$%d, %%rsp\n", n->allign_sub);
         }
         printf("\tcall\t%s\n", n->func_name);
-        if (n->allign_offset != 0) {
-            printf("\taddq\t$%d, %%rsp\n", n->allign_offset); // TODO: refactor, lame
+        if (n->allign_sub > 0) {
+            printf("\taddq\t$%d, %%rsp\n", n->allign_sub); // TODO: refactor, lame
         }
 
         return (storage_t){ .type = ST_NONE };
@@ -880,7 +890,7 @@ storage_t codegen(node_t *n, int *registers_used)
     } break;
 
     case NT_WHILE: {
-        unsigned ident = rand(); // TODO: can possibly collide
+        u32 ident = rand(); // TODO: can possibly collide
 
         printf(".while_start_%u:\n", ident);
 
@@ -902,7 +912,7 @@ storage_t codegen(node_t *n, int *registers_used)
     } break;
 
     case NT_IF: {
-        unsigned ident = rand(); // TODO: can possibly collide
+        u32 ident = rand(); // TODO: can possibly collide
 
         storage_t cond_init = codegen(n->if_cond, registers_used);
         assert(cond_init.type != ST_NONE);
@@ -949,23 +959,24 @@ int main(int argc, char *argv[])
     }
 
     fseek(fp, 0, SEEK_END);
-    size_t file_size = ftell(fp);
+    u64 file_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
-    char *s = arena_alloc(&a, sizeof(*s) * (file_size + 1));
-    fread(s, 1, file_size, fp);
-    s[file_size] = '\0';
+    char *contents = malloc(file_size + 1);
+    assert(contents && "malloc failed");
 
-    token_t *ts = tokenize(s, strlen(s));
-    /*
-    print_tokens(ts);
-    */
+    fread(contents, 1, file_size, fp);
+    contents[file_size] = '\0';
+    fclose(fp);
 
-    int eaten = 0;
+    token_t *ts = tokenize(contents, strlen(contents));
+    free(contents);
+
+    u32 eaten = 0;
     node_t *root = NULL;
     node_t *current = NULL;
 
-    while (eaten < arrlen(ts)) {
+    while (eaten < arrlenu(ts)) {
         if (!root) {
             root = parse(ts, &eaten, &a);
             current = root;
@@ -975,17 +986,12 @@ int main(int argc, char *argv[])
         }
     }
 
-    int scope_count = 0;
+    u32 scope_count = 0;
     scope_pass(root, &scope_count);
 
-    int stack_offset = 0;
-    int scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
+    s32 stack_offset = 0;
+    u32 scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
     var_pass(root, &stack_offset, scope_ids, 1);
-
-/*
-    print_ast(root);
-    printf("\n");
-*/
 
     printf(".section .text\n");
     printf(".globl _start\n");
@@ -1011,7 +1017,7 @@ int main(int argc, char *argv[])
 
     current = root;
     while (current) {
-        int registers_used = 0;
+        u8 registers_used = 0;
         codegen(current, &registers_used);
         current = current->next;
     }
