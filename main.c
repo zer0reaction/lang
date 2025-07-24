@@ -47,6 +47,7 @@ typedef enum{
     TT_CMP_NEQ,
     TT_CMP_LESS,
     TT_CMP_LESS_OR_EQ,
+    TT_CMP_GREATER,
     TT_PLUS,
     TT_MINUS,
     TT_LET,
@@ -81,6 +82,7 @@ typedef enum{
     NT_CMP_NEQ,
     NT_CMP_LESS,
     NT_CMP_LESS_OR_EQ,
+    NT_CMP_GREATER,
     NT_VAR,
     NT_DECL,
     NT_WHILE,
@@ -151,7 +153,7 @@ token_t *tokenize(const char *s, u64 len)
     u64 i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 18);
+    assert(TT_COUNT == 19);
 
     while (i < len) {
         if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
@@ -251,6 +253,12 @@ token_t *tokenize(const char *s, u64 len)
             arrput(ts, t);
             i += strlen("<");
         }
+        else if (len - i >= strlen(">") && strncmp(&s[i], ">", strlen(">")) == 0) {
+            token_t t = {0};
+            t.type = TT_CMP_GREATER;
+            arrput(ts, t);
+            i += strlen(">");
+        }
 
         /* int literal and identifier */
         else if (s[i] >= '0' && s[i] <= '9') {
@@ -338,8 +346,8 @@ void print_tokens(const token_t *ts)
 
 node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 {
-    assert(TT_COUNT == 18);
-    assert(NT_COUNT == 15);
+    assert(TT_COUNT == 19);
+    assert(NT_COUNT == 16);
 
     assert(*eaten < arrlenu(ts));
 
@@ -432,6 +440,13 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 
     case TT_CMP_LESS_OR_EQ: {
         n->type = NT_CMP_LESS_OR_EQ;
+        *eaten += 1;
+        n->lval = parse(ts, eaten, a);
+        n->rval = parse(ts, eaten, a);
+    } break;
+
+    case TT_CMP_GREATER: {
+        n->type = NT_CMP_GREATER;
         *eaten += 1;
         n->lval = parse(ts, eaten, a);
         n->rval = parse(ts, eaten, a);
@@ -553,7 +568,7 @@ void print_ast(const node_t *n)
 
 void scope_pass(node_t *n, u32 *scope_count)
 {
-    assert(NT_COUNT == 15);
+    assert(NT_COUNT == 16);
 
     if (!n) return;
 
@@ -569,6 +584,7 @@ void scope_pass(node_t *n, u32 *scope_count)
     case NT_CMP_NEQ:
     case NT_CMP_LESS:
     case NT_CMP_LESS_OR_EQ:
+    case NT_CMP_GREATER:
     case NT_ASSIGN: {
         scope_pass(n->lval, scope_count);
         scope_pass(n->rval, scope_count);
@@ -600,7 +616,7 @@ void scope_pass(node_t *n, u32 *scope_count)
 
 void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
 {
-    assert(NT_COUNT == 15);
+    assert(NT_COUNT == 16);
 
     if (!n) return;
 
@@ -661,6 +677,7 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
     case NT_CMP_NEQ:
     case NT_CMP_LESS:
     case NT_CMP_LESS_OR_EQ:
+    case NT_CMP_GREATER:
     case NT_ASSIGN: {
         var_pass(n->lval, stack_offset, scope_ids, size);
         var_pass(n->rval, stack_offset, scope_ids, size);
@@ -774,7 +791,7 @@ storage_t make_mutable(storage_t st, u8 *registers_used)
 
 storage_t codegen(const node_t *n, u8 *registers_used)
 {
-    assert(NT_COUNT == 15);
+    assert(NT_COUNT == 16);
 
     switch (n->type) {
     case NT_DECL:
@@ -875,6 +892,26 @@ storage_t codegen(const node_t *n, u8 *registers_used)
         unwrap_storage(lval_reg);
         printf("\n");
         printf("\tsetle\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
+        printf("\tandl\t$0xFF, ");
+        unwrap_storage(lval_reg);
+        printf("\n");
+
+        return lval_reg;
+    } break;
+
+    case NT_CMP_GREATER: {
+        storage_t lval_init = codegen(n->lval, registers_used);
+        storage_t rval = codegen(n->rval, registers_used);
+        assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
+
+        storage_t lval_reg = move_to_register(lval_init, registers_used);
+
+        printf("\tcmp\t");
+        unwrap_storage(rval);
+        printf(", ");
+        unwrap_storage(lval_reg);
+        printf("\n");
+        printf("\tsetg\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
         unwrap_storage(lval_reg);
         printf("\n");
