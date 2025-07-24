@@ -15,15 +15,15 @@
 
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
 
-static char *scratch_4b_registers[] = {
+static const char *scratch_4b_registers[] = {
     "eax", "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d"
 };
-static char *scratch_1b_registers[] = {
+static const char *scratch_1b_registers[] = {
     "al", "dil", "sil", "dl", "cl", "r8b", "r9b", "r10b", "r11b"
 };
 #define REGISTERS_COUNT (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
 
-static char *argument_registers[] = {
+static const char *argument_registers[] = {
     "edi", "esi", "edx", "ecx", "r8d", "r9d"
 };
 #define FUNCTION_ARGS_MAX (sizeof(argument_registers) / sizeof(*argument_registers))
@@ -144,7 +144,7 @@ typedef struct{
 
 static symbol_t *table = NULL;
 
-token_t *tokenize(char *s, u64 len)
+token_t *tokenize(const char *s, u64 len)
 {
     u64 i = 0;
     token_t *ts = NULL;
@@ -278,7 +278,7 @@ token_t *tokenize(char *s, u64 len)
     return ts;
 }
 
-void print_tokens(token_t *ts)
+void print_tokens(const token_t *ts)
 {
     assert(TT_COUNT == 10);
 
@@ -328,7 +328,7 @@ void print_tokens(token_t *ts)
     printf("\n");
 }
 
-node_t *parse(token_t *ts, u32 *eaten, Arena *a)
+node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 {
     assert(TT_COUNT == 17);
     assert(NT_COUNT == 14);
@@ -463,7 +463,7 @@ node_t *parse(token_t *ts, u32 *eaten, Arena *a)
     return n;
 }
 
-void print_ast(node_t *n)
+void print_ast(const node_t *n)
 {
     assert(NT_COUNT == 10);
 
@@ -582,7 +582,7 @@ void scope_pass(node_t *n, u32 *scope_count)
     scope_pass(n->next, scope_count);
 }
 
-void var_pass(node_t *n, s32 *stack_offset, u32 scope_ids[], u32 size)
+void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
 {
     assert(NT_COUNT == 14);
 
@@ -755,7 +755,7 @@ storage_t make_mutable(storage_t st, u8 *registers_used)
     }
 }
 
-storage_t codegen(node_t *n, u8 *registers_used)
+storage_t codegen(const node_t *n, u8 *registers_used)
 {
     assert(NT_COUNT == 14);
 
