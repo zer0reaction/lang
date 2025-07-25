@@ -56,6 +56,7 @@ typedef enum{
     TT_WHILE,
     TT_IF,
     TT_ELSE,
+    TT_FN,
     TT_ROUND_OPEN,
     TT_ROUND_CLOSE,
     TT_CURLY_OPEN,
@@ -91,6 +92,7 @@ typedef enum{
     NT_WHILE,
     NT_IF,
     NT_FUNC_CALL,
+    NT_FUNC_DECL,
     NT_SCOPE,
     NT_INT,
     NT_CHAR,
@@ -128,6 +130,7 @@ struct node_t{
         struct {
             char func_name[IDENT_NAME_MAX_LEN + 1];
             node_t *args[FUNCTION_ARGS_MAX];
+            node_t *func_body;
             u8 args_count;
             u8 allign_sub; /* positive value, subtracted from rsp before call */
         };
@@ -159,7 +162,7 @@ token_t *tokenize(const char *s, u64 len)
     u64 i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 21);
+    assert(TT_COUNT == 22);
 
     while (i < len) {
         if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
@@ -225,6 +228,12 @@ token_t *tokenize(const char *s, u64 len)
             t.type = TT_ELSE;
             arrput(ts, t);
             i += strlen("else");
+        }
+        else if (len - i >= strlen("fn") && strncmp(&s[i], "fn", strlen("fn")) == 0) {
+            token_t t = {0};
+            t.type = TT_FN;
+            arrput(ts, t);
+            i += strlen("fn");
         }
         else if (len - i >= strlen("==") && strncmp(&s[i], "==", strlen("==")) == 0) {
             token_t t = {0};
@@ -343,8 +352,8 @@ token_t *tokenize(const char *s, u64 len)
 
 node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 {
-    assert(TT_COUNT == 21);
-    assert(NT_COUNT == 18);
+    assert(TT_COUNT == 22);
+    assert(NT_COUNT == 19);
 
     assert(*eaten < arrlenu(ts));
 
@@ -411,6 +420,32 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
             strcpy(n->var_name, ts[*eaten].ident_name);
             *eaten += 1;
         }
+    } break;
+
+    case TT_FN: {
+        assert(arrlenu(ts) - *eaten >= 6);
+
+        n->type = NT_FUNC_DECL;
+        *eaten += 1;
+
+        assert(ts[*eaten].type == TT_IDENT);
+        strcpy(n->func_name, ts[*eaten].ident_name);
+        *eaten += 1;
+
+        assert(ts[*eaten].type == TT_ROUND_OPEN);
+        *eaten += 1;
+
+        while (ts[*eaten].type != TT_ROUND_CLOSE) {
+            assert(arrlenu(ts) - *eaten > 1);
+            assert(n->args_count < FUNCTION_ARGS_MAX);
+            node_t *arg = parse(ts, eaten, a);
+            assert(arg->type == NT_VAR);
+            n->args[n->args_count++] = arg;
+        }
+        *eaten += 1;
+
+        n->func_body = parse(ts, eaten, a);
+        assert(n->func_body->type == NT_SCOPE);
     } break;
 
     case TT_EQUAL: {
@@ -505,7 +540,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
 
 void scope_pass(node_t *n, u32 *scope_count)
 {
-    assert(NT_COUNT == 18);
+    assert(NT_COUNT == 19);
 
     if (!n) return;
 
@@ -524,6 +559,10 @@ void scope_pass(node_t *n, u32 *scope_count)
         scope_pass(n->else_body, scope_count);
     } break;
 
+    case NT_FUNC_DECL: {
+        scope_pass(n->func_body, scope_count);
+    } break;
+
     default:
         /* no need to call on other things */
         break;
@@ -532,9 +571,9 @@ void scope_pass(node_t *n, u32 *scope_count)
     scope_pass(n->next, scope_count);
 }
 
-void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
+void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Arena *a)
 {
-    assert(NT_COUNT == 18);
+    assert(NT_COUNT == 19);
 
     if (!n) return;
 
@@ -586,7 +625,7 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
             new_scope_ids[i] = scope_ids[i];
         }
         new_scope_ids[size] = n->scope_id;
-        var_pass(n->scope_start, stack_offset, new_scope_ids, size + 1);
+        var_pass(n->scope_start, stack_offset, new_scope_ids, size + 1, a);
     } break;
 
     case NT_SUM:
@@ -598,34 +637,50 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
     case NT_CMP_GREATER:
     case NT_CMP_GREATER_OR_EQ:
     case NT_ASSIGN: {
-        var_pass(n->lval, stack_offset, scope_ids, size);
-        var_pass(n->rval, stack_offset, scope_ids, size);
+        var_pass(n->lval, stack_offset, scope_ids, size, a);
+        var_pass(n->rval, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_WHILE: {
-        var_pass(n->while_cond, stack_offset, scope_ids, size);
-        var_pass(n->while_body, stack_offset, scope_ids, size);
+        var_pass(n->while_cond, stack_offset, scope_ids, size, a);
+        var_pass(n->while_body, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_IF: {
-        var_pass(n->if_cond, stack_offset, scope_ids, size);
-        var_pass(n->if_body, stack_offset, scope_ids, size);
-        var_pass(n->else_body, stack_offset, scope_ids, size);
+        var_pass(n->if_cond, stack_offset, scope_ids, size, a);
+        var_pass(n->if_body, stack_offset, scope_ids, size, a);
+        var_pass(n->else_body, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_FUNC_CALL: {
         /* TODO: refactor, lame */
         n->allign_sub = ABSOLUTE(*stack_offset) + (16 - ABSOLUTE(*stack_offset) % 16) % 16;
         for (u64 i = 0; i < n->args_count; i++) {
-            var_pass(n->args[i], stack_offset, scope_ids, size);
+            var_pass(n->args[i], stack_offset, scope_ids, size, a);
         }
+    } break;
+
+    case NT_FUNC_DECL: {
+        for (s64 i = n->args_count - 1; i >= 0; i--) {
+            node_t *var_decl = arena_alloc(a, sizeof(*var_decl));
+            memset(var_decl, 0, sizeof(*var_decl));
+
+            var_decl->type = NT_VAR_DECL;
+            strcpy(var_decl->var_name, n->args[i]->var_name);
+
+            var_decl->next = n->func_body->scope_start;
+            n->func_body->scope_start = var_decl;
+        }
+
+        s32 func_stack = 0;
+        var_pass(n->func_body, &func_stack, scope_ids, size, a);
     } break;
 
     default:
         break;
     }
 
-    var_pass(n->next, stack_offset, scope_ids, size);
+    var_pass(n->next, stack_offset, scope_ids, size, a);
 }
 
 void unwrap_storage(storage_t st)
@@ -710,7 +765,7 @@ storage_t make_mutable(storage_t st, u8 *registers_used)
 
 storage_t codegen(const node_t *n, u8 *registers_used)
 {
-    assert(NT_COUNT == 18);
+    assert(NT_COUNT == 19);
 
     switch (n->type) {
     case NT_VAR_DECL:
@@ -914,6 +969,34 @@ storage_t codegen(const node_t *n, u8 *registers_used)
         return (storage_t){ .type = ST_NONE };
     } break;
 
+    case NT_FUNC_DECL: {
+        /* variable nodes in the args are just names, there are no ids assigned to them */
+        /* variable declaration nodes are pushed at the start of the function body (scope) */
+
+        printf("%s:\n", n->func_name);
+        printf("\tpushq\t%%rbp\n");
+        printf("\tmovq\t%%rsp, %%rbp\n");
+
+        node_t *current = n->func_body->scope_start;
+        for (u64 i = 0; i < n->args_count; i++) {
+            printf("\tmovl\t%%%s, ", argument_registers[i]);
+            unwrap_storage(codegen(current, registers_used));
+            printf("\n");
+            current = current->next;
+        }
+
+        while (current) {
+            codegen(current, registers_used);
+            current = current->next;
+        }
+
+        printf("\tleave\n");
+        printf("\tret\n");
+        printf("\n");
+
+        return (storage_t){ .type = ST_NONE };
+    } break;
+
     case NT_SCOPE: {
         node_t *current = n->scope_start;
         while (current) {
@@ -1007,25 +1090,42 @@ int main(int argc, char *argv[])
     free(contents);
 
     u32 eaten = 0;
+    node_t *functions = NULL;
     node_t *root = NULL;
-    node_t *current = NULL;
+    node_t *current_glob = NULL;
+    node_t *current_func = NULL;
 
+    /* TODO: refactor */
     while (eaten < arrlenu(ts)) {
-        if (!root) {
-            root = parse(ts, &eaten, &a);
-            current = root;
+        node_t *n = parse(ts, &eaten, &a);
+
+        if (n->type == NT_FUNC_DECL) {
+            if (!functions) {
+                functions = n;
+                current_func = functions;
+            } else {
+                current_func->next = n;
+                current_func = current_func->next;
+            }
         } else {
-            current->next = parse(ts, &eaten, &a);
-            current = current->next;
+            if (!root) {
+                root = n;
+                current_glob = root;
+            } else {
+                current_glob->next = n;
+                current_glob = current_glob->next;
+            }
         }
     }
 
     u32 scope_count = 0;
     scope_pass(root, &scope_count);
+    scope_pass(functions, &scope_count);
 
     s32 stack_offset = 0;
     u32 scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
-    var_pass(root, &stack_offset, scope_ids, 1);
+    var_pass(root, &stack_offset, scope_ids, 1, &a);
+    var_pass(functions, &stack_offset, scope_ids, 1, &a);
 
     /*
     print_tokens(ts);
@@ -1034,9 +1134,18 @@ int main(int argc, char *argv[])
     printf("\n\n");
     */
 
+    node_t *current_node = NULL;
+
     printf(".section .text\n");
     printf(".globl _start\n");
     printf("\n");
+
+    current_node = functions;
+    while (current_node) {
+        u8 registers_used = 0;
+        codegen(current_node, &registers_used);
+        current_node = current_node->next;
+    }
 
     printf("putchar:\n");
     printf("\tpushq\t%%rbp\n");
@@ -1056,11 +1165,11 @@ int main(int argc, char *argv[])
     printf("\tmovq\t%%rsp, %%rbp\n");
     printf("\n");
 
-    current = root;
-    while (current) {
+    current_node = root;
+    while (current_node) {
         u8 registers_used = 0;
-        codegen(current, &registers_used);
-        current = current->next;
+        codegen(current_node, &registers_used);
+        current_node = current_node->next;
     }
 
     printf("\n");
