@@ -152,7 +152,7 @@ typedef struct{
 
 static symbol_t *table = NULL;
 
-#include "testing.c" // weird, but ok
+#include "testing.c" /* weird, but ok */
 
 token_t *tokenize(const char *s, u64 len)
 {
@@ -177,7 +177,7 @@ token_t *tokenize(const char *s, u64 len)
             if (s[i] == '\\') {
                 assert(len - i >= 3 && s[i + 2] == '\'');
                 i += 1;
-                // TODO: add more escape characters
+                /* TODO: add more escape characters */
                 switch (s[i]) {
                 case 't':
                     t.int_value = '\t';
@@ -525,7 +525,7 @@ void scope_pass(node_t *n, u32 *scope_count)
     } break;
 
     default:
-        // no need to call on other things
+        /* no need to call on other things */
         break;
     }
 
@@ -614,7 +614,7 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
     } break;
 
     case NT_FUNC_CALL: {
-        // TODO: refactor, lame
+        /* TODO: refactor, lame */
         n->allign_sub = ABSOLUTE(*stack_offset) + (16 - ABSOLUTE(*stack_offset) % 16) % 16;
         for (u64 i = 0; i < n->args_count; i++) {
             var_pass(n->args[i], stack_offset, scope_ids, size);
@@ -908,7 +908,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
         }
         printf("\tcall\t%s\n", n->func_name);
         if (n->allign_sub > 0) {
-            printf("\taddq\t$%d, %%rsp\n", n->allign_sub); // TODO: refactor, lame
+            printf("\taddq\t$%d, %%rsp\n", n->allign_sub); /* TODO: refactor, lame */
         }
 
         return (storage_t){ .type = ST_NONE };
@@ -924,7 +924,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
     } break;
 
     case NT_WHILE: {
-        u32 ident = rand(); // TODO: can possibly collide
+        u32 ident = rand(); /* TODO: can possibly collide */
 
         printf(".while_start_%u:\n", ident);
 
@@ -946,7 +946,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
     } break;
 
     case NT_IF: {
-        u32 ident = rand(); // TODO: can possibly collide
+        u32 ident = rand(); /* TODO: can possibly collide */
 
         storage_t cond_init = codegen(n->if_cond, registers_used);
         assert(cond_init.type != ST_NONE);
