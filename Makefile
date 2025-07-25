@@ -1,16 +1,12 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -std=c99 -fsanitize=address,undefined
 
-all: main
+all: lang
 
-main: main.c
-	${CC} ${CFLAGS} -o main main.c
+lang: lang.c
+	${CC} ${CFLAGS} -o lang lang.c
 
-test: main test.lang
-	./main test.lang > .build/test.s
-	as -o .build/test.o .build/test.s
-	ld -o test .build/test.o
-
-assemble: .build/test.s
+test: lang test.lang
+	./lang test.lang > .build/test.s
 	as -o .build/test.o .build/test.s
 	ld -o test .build/test.o
