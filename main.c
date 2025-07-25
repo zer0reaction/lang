@@ -87,7 +87,7 @@ typedef enum{
     NT_CMP_GREATER,
     NT_CMP_GREATER_OR_EQ,
     NT_VAR,
-    NT_DECL,
+    NT_VAR_DECL,
     NT_WHILE,
     NT_IF,
     NT_FUNC_CALL,
@@ -368,7 +368,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
         assert(arrlenu(ts) - *eaten >= 2);
         assert(ts[*eaten + 1].type == TT_IDENT);
 
-        n->type = NT_DECL;
+        n->type = NT_VAR_DECL;
         strcpy(n->var_name, ts[*eaten + 1].ident_name);
         *eaten += 2;
     } break;
@@ -515,37 +515,17 @@ void scope_pass(node_t *n, u32 *scope_count)
         scope_pass(n->scope_start, scope_count);
     } break;
 
-    case NT_SUM:
-    case NT_SUB:
-    case NT_CMP_EQ:
-    case NT_CMP_NEQ:
-    case NT_CMP_LESS:
-    case NT_CMP_LESS_OR_EQ:
-    case NT_CMP_GREATER:
-    case NT_CMP_GREATER_OR_EQ:
-    case NT_ASSIGN: {
-        scope_pass(n->lval, scope_count);
-        scope_pass(n->rval, scope_count);
-    } break;
-
     case NT_WHILE: {
-        scope_pass(n->while_cond, scope_count);
         scope_pass(n->while_body, scope_count);
     } break;
 
     case NT_IF: {
-        scope_pass(n->if_cond, scope_count);
         scope_pass(n->if_body, scope_count);
         scope_pass(n->else_body, scope_count);
     } break;
 
-    case NT_FUNC_CALL: {
-        for (u64 i = 0; i < n->args_count; i++) {
-            scope_pass(n->args[i], scope_count);
-        }
-    } break;
-
     default:
+        // no need to call on other things
         break;
     }
 
@@ -559,7 +539,7 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size)
     if (!n) return;
 
     switch (n->type) {
-    case NT_DECL: {
+    case NT_VAR_DECL: {
         assert(size >= 1);
         bool in_current_scope = false;
         u32 current_scope_id = scope_ids[size - 1];
@@ -733,7 +713,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
     assert(NT_COUNT == 18);
 
     switch (n->type) {
-    case NT_DECL:
+    case NT_VAR_DECL:
     case NT_VAR: {
         return (storage_t){ .table_id = n->table_id, .type = ST_STACK };
     } break;

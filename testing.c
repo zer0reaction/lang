@@ -136,7 +136,7 @@ void print_ast(const node_t *n)
                table[n->table_id].stack_offset);
     } break;
 
-    case NT_DECL: {
+    case NT_VAR_DECL: {
         printf("(let `%s` id:%u offset:%d)", table[n->table_id].ident_name, n->table_id,
                table[n->table_id].stack_offset);
     } break;
