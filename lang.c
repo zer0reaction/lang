@@ -796,17 +796,23 @@ storage_t codegen(const node_t *n, u8 *registers_used)
     case NT_ASSIGN: {
         storage_t lval = codegen(n->lval, registers_used);
         storage_t rval_init = codegen(n->rval, registers_used);
-        assert(lval.type != ST_NONE && rval_init.type != ST_NONE);
+        assert(lval.type == ST_STACK && rval_init.type != ST_NONE);
 
-        storage_t rval_reg = move_to_register(rval_init, registers_used);
+        storage_t rval_proc = {0};
+
+        if (rval_init.type == ST_STACK) {
+            rval_proc = move_to_register(rval_init, registers_used);
+        } else {
+            rval_proc = rval_init;
+        }
 
         printf("\tmovl\t");
-        unwrap_storage(rval_reg);
+        unwrap_storage(rval_proc);
         printf(", ");
         unwrap_storage(lval);
         printf("\n");
 
-        return rval_reg;
+        return rval_proc;
     } break;
 
     case NT_CMP_EQ: {
