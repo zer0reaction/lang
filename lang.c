@@ -161,10 +161,25 @@ token_t *tokenize(const char *s, u64 len)
 {
     u64 i = 0;
     token_t *ts = NULL;
+    bool is_comment = false;
 
     assert(TT_COUNT == 22);
 
     while (i < len) {
+        /* comments */
+        if (s[i] == ';') {
+            is_comment = true;
+        }
+        else if (is_comment && s[i] == '\n') {
+            is_comment = false;
+        }
+
+        if (is_comment) {
+            i += 1;
+            continue;
+        }
+
+        /* blank characters */
         if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
             i += 1;
         }
