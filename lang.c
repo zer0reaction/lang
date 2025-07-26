@@ -1184,7 +1184,6 @@ int main(int argc, char *argv[])
 
     printf("_start:\n");
     printf("\tmovq\t%%rsp, %%rbp\n");
-    printf("\n");
 
     current_node = root;
     while (current_node) {
@@ -1193,7 +1192,6 @@ int main(int argc, char *argv[])
         current_node = current_node->next;
     }
 
-    printf("\n");
     printf("\tmovq\t$60, %%rax\n");
     printf("\tmovq\t$0, %%rdi\n");
     printf("\tsyscall\n");
