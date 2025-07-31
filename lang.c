@@ -1019,6 +1019,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
     } break;
 
     case NT_SCOPE: {
+        *registers_used = 0;
         node_t *current = n->scope_start;
         while (current) {
             codegen(current, registers_used);
