@@ -16,10 +16,10 @@
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
 
 static const char *scratch_4b_registers[] = {
-    "eax", "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d"
+    "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d"
 };
 static const char *scratch_1b_registers[] = {
-    "al", "dil", "sil", "dl", "cl", "r8b", "r9b", "r10b", "r11b"
+    "dil", "sil", "dl", "cl", "r8b", "r9b", "r10b", "r11b"
 };
 #define REGISTERS_COUNT (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
 
@@ -185,6 +185,7 @@ token_t *tokenize(const char *s, u64 len)
         }
 
         /* multichar tokens */
+        /* TODO: breaks on something like '0 ' */
         else if (s[i] == '\'') {
             assert(len - i >= 3);
             i += 1;
@@ -987,7 +988,12 @@ storage_t codegen(const node_t *n, u8 *registers_used)
             printf("\taddq\t$%d, %%rsp\n", n->allign_sub); /* TODO: refactor, lame */
         }
 
-        return (storage_t){ .type = ST_NONE };
+        /* TODO: currently recursive function calls can modify the registers of the previous calls, too bad, FIX! */
+        assert(*registers_used < REGISTERS_COUNT);
+        u8 register_id = (*registers_used)++;
+        printf("\tmovl\t%%eax, %%%s\n", scratch_4b_registers[register_id]);
+
+        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
     } break;
 
     case NT_FUNC_DECL: {
@@ -1006,8 +1012,19 @@ storage_t codegen(const node_t *n, u8 *registers_used)
             current = current->next;
         }
 
+        storage_t return_val = { .type = ST_NONE };
+
         while (current) {
-            codegen(current, registers_used);
+            if (!current->next) {
+                return_val = codegen(current, registers_used);
+                if (return_val.type != ST_NONE) {
+                    printf("\tmovl\t");
+                    unwrap_storage(return_val);
+                    printf(", %%eax\n");
+                }
+            } else {
+                codegen(current, registers_used);
+            }
             current = current->next;
         }
 
