@@ -43,7 +43,7 @@ typedef enum{
     TT_IDENT,
     TT_INT_LITERAL,
     TT_CHAR_LITERAL,
-    TT_EQUAL,
+    TT_COLUMN_EQUAL,
     TT_CMP_EQ,
     TT_CMP_NEQ,
     TT_CMP_LESS,
@@ -251,6 +251,12 @@ token_t *tokenize(const char *s, u64 len)
             arrput(ts, t);
             i += strlen("fn");
         }
+        else if (len - i >= strlen(":=") && strncmp(&s[i], ":=", strlen(":=")) == 0) {
+            token_t t = {0};
+            t.type = TT_COLUMN_EQUAL;
+            arrput(ts, t);
+            i += strlen(":=");
+        }
         else if (len - i >= strlen("==") && strncmp(&s[i], "==", strlen("==")) == 0) {
             token_t t = {0};
             t.type = TT_CMP_EQ;
@@ -277,12 +283,6 @@ token_t *tokenize(const char *s, u64 len)
         }
 
         /* single char tokens */
-        else if (len - i >= strlen("=") && strncmp(&s[i], "=", strlen("=")) == 0) {
-            token_t t = {0};
-            t.type = TT_EQUAL;
-            arrput(ts, t);
-            i += strlen("=");
-        }
         else if (len - i >= strlen("+") && strncmp(&s[i], "+", strlen("+")) == 0) {
             token_t t = {0};
             t.type = TT_PLUS;
@@ -464,7 +464,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
         assert(n->func_body->type == NT_SCOPE);
     } break;
 
-    case TT_EQUAL: {
+    case TT_COLUMN_EQUAL: {
         n->type = NT_ASSIGN;
         *eaten += 1;
         n->lval = parse(ts, eaten, a);

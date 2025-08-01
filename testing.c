@@ -15,7 +15,7 @@ void print_tokens(const token_t *ts)
         case TT_CHAR_LITERAL:
             printf("'%c'", (char)t.int_value);
             break;
-        case TT_EQUAL:
+        case TT_COLUMN_EQUAL:
             printf("=");
             break;
         case TT_CMP_EQ:
