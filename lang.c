@@ -73,6 +73,11 @@ typedef struct{
 }token_t;
 
 typedef struct{
+    char *s;
+    tt_t t;
+}token_string_t;
+
+typedef struct{
     char ident_name[IDENT_NAME_MAX_LEN + 1];
     s32 stack_offset; /* negative value */
     u32 scope_id;
@@ -155,6 +160,28 @@ typedef struct{
 
 static symbol_t *table = NULL;
 
+static token_string_t token_strings[] = {
+    { .s = ":=",    .t = TT_COLUMN_EQUAL },
+    { .s = "==",    .t = TT_CMP_EQ },
+    { .s = "!=",    .t = TT_CMP_NEQ },
+    { .s = "<=",    .t = TT_CMP_LESS_OR_EQ },
+    { .s = ">=",    .t = TT_CMP_GREATER_OR_EQ },
+    { .s = "let",   .t = TT_LET },
+    { .s = "while", .t = TT_WHILE },
+    { .s = "if",    .t = TT_IF },
+    { .s = "else",  .t = TT_ELSE },
+    { .s = "fn",    .t = TT_FN },
+    { .s = "+",     .t = TT_PLUS },
+    { .s = "-",     .t = TT_MINUS },
+    { .s = "<",     .t = TT_CMP_LESS },
+    { .s = ">",     .t = TT_CMP_GREATER },
+    { .s = "(",     .t = TT_ROUND_OPEN },
+    { .s = ")",     .t = TT_ROUND_CLOSE },
+    { .s = "{",     .t = TT_CURLY_OPEN },
+    { .s = "}",     .t = TT_CURLY_CLOSE }
+};
+#define TOKEN_STRINGS_COUNT (sizeof(token_strings) / sizeof(*token_strings))
+
 #include "testing.c" /* weird, but ok */
 
 token_t *tokenize(const char *s, u64 len)
@@ -173,7 +200,6 @@ token_t *tokenize(const char *s, u64 len)
         else if (is_comment && s[i] == '\n') {
             is_comment = false;
         }
-
         if (is_comment) {
             i += 1;
             continue;
@@ -182,11 +208,27 @@ token_t *tokenize(const char *s, u64 len)
         /* blank characters */
         if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
             i += 1;
+            continue;
         }
 
-        /* multichar tokens */
+        /* pre-defined tokens */
+        bool match = false;
+        for (u64 j = 0; j < TOKEN_STRINGS_COUNT; j++) {
+            token_string_t current = token_strings[j];
+            if (len - i >= strlen(current.s) && strncmp(&s[i], current.s, strlen(current.s)) == 0) {
+                token_t t = {0};
+                t.type = current.t;
+                arrput(ts, t);
+                i += strlen(current.s);
+                match = true;
+                break;
+            }
+        }
+        if (match) continue;
+
+        /* character literal */
         /* TODO: breaks on something like '0 ' */
-        else if (s[i] == '\'') {
+        if (s[i] == '\'') {
             assert(len - i >= 3);
             i += 1;
 
@@ -220,120 +262,11 @@ token_t *tokenize(const char *s, u64 len)
             }
 
             arrput(ts, t);
-        }
-        else if (len - i >= strlen("let") && strncmp(&s[i], "let", strlen("let")) == 0) {
-            token_t t = {0};
-            t.type = TT_LET;
-            arrput(ts, t);
-            i += strlen("let");
-        }
-        else if (len - i >= strlen("while") && strncmp(&s[i], "while", strlen("while")) == 0) {
-            token_t t = {0};
-            t.type = TT_WHILE;
-            arrput(ts, t);
-            i += strlen("while");
-        }
-        else if (len - i >= strlen("if") && strncmp(&s[i], "if", strlen("if")) == 0) {
-            token_t t = {0};
-            t.type = TT_IF;
-            arrput(ts, t);
-            i += strlen("if");
-        }
-        else if (len - i >= strlen("else") && strncmp(&s[i], "else", strlen("else")) == 0) {
-            token_t t = {0};
-            t.type = TT_ELSE;
-            arrput(ts, t);
-            i += strlen("else");
-        }
-        else if (len - i >= strlen("fn") && strncmp(&s[i], "fn", strlen("fn")) == 0) {
-            token_t t = {0};
-            t.type = TT_FN;
-            arrput(ts, t);
-            i += strlen("fn");
-        }
-        else if (len - i >= strlen(":=") && strncmp(&s[i], ":=", strlen(":=")) == 0) {
-            token_t t = {0};
-            t.type = TT_COLUMN_EQUAL;
-            arrput(ts, t);
-            i += strlen(":=");
-        }
-        else if (len - i >= strlen("==") && strncmp(&s[i], "==", strlen("==")) == 0) {
-            token_t t = {0};
-            t.type = TT_CMP_EQ;
-            arrput(ts, t);
-            i += strlen("==");
-        }
-        else if (len - i >= strlen("!=") && strncmp(&s[i], "!=", strlen("!=")) == 0) {
-            token_t t = {0};
-            t.type = TT_CMP_NEQ;
-            arrput(ts, t);
-            i += strlen("!=");
-        }
-        else if (len - i >= strlen("<=") && strncmp(&s[i], "<=", strlen("<=")) == 0) {
-            token_t t = {0};
-            t.type = TT_CMP_LESS_OR_EQ;
-            arrput(ts, t);
-            i += strlen("<=");
-        }
-        else if (len - i >= strlen(">=") && strncmp(&s[i], ">=", strlen(">=")) == 0) {
-            token_t t = {0};
-            t.type = TT_CMP_GREATER_OR_EQ;
-            arrput(ts, t);
-            i += strlen(">=");
+            continue;
         }
 
-        /* single char tokens */
-        else if (len - i >= strlen("+") && strncmp(&s[i], "+", strlen("+")) == 0) {
-            token_t t = {0};
-            t.type = TT_PLUS;
-            arrput(ts, t);
-            i += strlen("+");
-        }
-        else if (len - i >= strlen("-") && strncmp(&s[i], "-", strlen("-")) == 0) {
-            token_t t = {0};
-            t.type = TT_MINUS;
-            arrput(ts, t);
-            i += strlen("-");
-        }
-        else if (len - i >= strlen("(") && strncmp(&s[i], "(", strlen("(")) == 0) {
-            token_t t = {0};
-            t.type = TT_ROUND_OPEN;
-            arrput(ts, t);
-            i += strlen("(");
-        }
-        else if (len - i >= strlen(")") && strncmp(&s[i], ")", strlen(")")) == 0) {
-            token_t t = {0};
-            t.type = TT_ROUND_CLOSE;
-            arrput(ts, t);
-            i += strlen(")");
-        }
-        else if (len - i >= strlen("{") && strncmp(&s[i], "{", strlen("{")) == 0) {
-            token_t t = {0};
-            t.type = TT_CURLY_OPEN;
-            arrput(ts, t);
-            i += strlen("{");
-        }
-        else if (len - i >= strlen("}") && strncmp(&s[i], "}", strlen("}")) == 0) {
-            token_t t = {0};
-            t.type = TT_CURLY_CLOSE;
-            arrput(ts, t);
-            i += strlen("}");
-        }
-        else if (len - i >= strlen("<") && strncmp(&s[i], "<", strlen("<")) == 0) {
-            token_t t = {0};
-            t.type = TT_CMP_LESS;
-            arrput(ts, t);
-            i += strlen("<");
-        }
-        else if (len - i >= strlen(">") && strncmp(&s[i], ">", strlen(">")) == 0) {
-            token_t t = {0};
-            t.type = TT_CMP_GREATER;
-            arrput(ts, t);
-            i += strlen(">");
-        }
-
-        /* int literal and identifier */
-        else if (s[i] >= '0' && s[i] <= '9') {
+        /* int literal */
+        if (s[i] >= '0' && s[i] <= '9') {
             s32 value = 0;
             while (i < len && s[i] >= '0' && s[i] <= '9') {
                 value *= 10;
@@ -346,8 +279,11 @@ token_t *tokenize(const char *s, u64 len)
             t.int_value = value;
 
             arrput(ts, t);
+            continue;
         }
-        else if ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_') {
+
+        /* identifier */
+        if ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_') {
             token_t t = {0};
             t.type = TT_IDENT;
 
@@ -358,9 +294,11 @@ token_t *tokenize(const char *s, u64 len)
             }
 
             arrput(ts, t);
+            continue;
         }
 
-        else assert(0 && "unexpected character");
+        printf("%s", &s[i]);
+        assert(0 && "unexpected character");
     }
 
     return ts;
