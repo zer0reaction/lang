@@ -1,5 +1,4 @@
-void print_tokens(const token_t *ts)
-{
+void print_tokens(const token_t *ts) {
     assert(TT_COUNT == 21);
 
     for (u64 i = 0; i < arrlenu(ts); i++) {
@@ -75,8 +74,7 @@ void print_tokens(const token_t *ts)
     printf("\n");
 }
 
-void print_ast(const node_t *n)
-{
+void print_ast(const node_t *n) {
     assert(NT_COUNT == 18);
 
     if (n == NULL) return;

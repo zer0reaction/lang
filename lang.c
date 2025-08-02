@@ -38,7 +38,7 @@ typedef int16_t s16;
 typedef int32_t s32;
 typedef int64_t s64;
 
-typedef enum{
+typedef enum {
     TT_EMPTY = 0,
     TT_IDENT,
     TT_INT_LITERAL,
@@ -62,28 +62,28 @@ typedef enum{
     TT_CURLY_OPEN,
     TT_CURLY_CLOSE,
     TT_COUNT
-}tt_t;
+} tt_t;
 
-typedef struct{
+typedef struct {
     tt_t type;
     union {
         char ident_name[IDENT_NAME_MAX_LEN + 1];
         s32 int_value;
     };
-}token_t;
+} token_t;
 
-typedef struct{
+typedef struct {
     char *s;
     tt_t t;
-}token_string_t;
+} token_string_t;
 
-typedef struct{
+typedef struct {
     char ident_name[IDENT_NAME_MAX_LEN + 1];
     s32 stack_offset; /* negative value */
     u32 scope_id;
-}symbol_t;
+} symbol_t;
 
-typedef enum{
+typedef enum {
     NT_EMPTY = 0,
     NT_ASSIGN,
     NT_CMP_EQ,
@@ -104,10 +104,10 @@ typedef enum{
     NT_SUM,
     NT_SUB,
     NT_COUNT
-}nt_t;
+} nt_t;
 
 typedef struct node_t node_t;
-struct node_t{
+struct node_t {
     nt_t type;
     u32 table_id;
     node_t *next;
@@ -142,21 +142,21 @@ struct node_t{
     };
 };
 
-typedef enum{
+typedef enum {
     ST_NONE,
     ST_REGISTER,
     ST_STACK,
     ST_IMMEDIATE
-}st_t;
+} st_t;
 
-typedef struct{
+typedef struct {
     st_t type;
     union {
         u32 table_id;
         u8 register_id;
         s32 int_value;
     };
-}storage_t;
+} storage_t;
 
 static symbol_t *table = NULL;
 
@@ -184,8 +184,7 @@ static token_string_t token_strings[] = {
 
 #include "testing.c" /* weird, but ok */
 
-token_t *tokenize(const char *s, u64 len)
-{
+token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
     token_t *ts = NULL;
     bool is_comment = false;
@@ -304,8 +303,7 @@ token_t *tokenize(const char *s, u64 len)
     return ts;
 }
 
-node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
-{
+node_t *parse(const token_t *ts, u32 *eaten, Arena *a) {
     assert(TT_COUNT == 22);
     assert(NT_COUNT == 19);
 
@@ -492,8 +490,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a)
     return n;
 }
 
-void scope_pass(node_t *n, u32 *scope_count)
-{
+void scope_pass(node_t *n, u32 *scope_count) {
     assert(NT_COUNT == 19);
 
     if (!n) return;
@@ -525,8 +522,7 @@ void scope_pass(node_t *n, u32 *scope_count)
     scope_pass(n->next, scope_count);
 }
 
-void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Arena *a)
-{
+void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Arena *a) {
     assert(NT_COUNT == 19);
 
     if (!n) return;
@@ -637,8 +633,7 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Are
     var_pass(n->next, stack_offset, scope_ids, size, a);
 }
 
-void unwrap_storage(storage_t st)
-{
+void unwrap_storage(storage_t st) {
     switch (st.type) {
     case ST_STACK: {
         printf("%d(%%rbp)", table[st.table_id].stack_offset);
@@ -663,8 +658,7 @@ void unwrap_storage(storage_t st)
   register  -> do nothing
   stack     -> move to register
 */
-storage_t move_to_register(storage_t st, u8 *registers_used)
-{
+storage_t move_to_register(storage_t st, u8 *registers_used) {
     switch (st.type) {
     case ST_REGISTER: {
         return st;
@@ -694,8 +688,7 @@ storage_t move_to_register(storage_t st, u8 *registers_used)
   register  -> do nothing
   stack     -> do nothing
 */
-storage_t make_mutable(storage_t st, u8 *registers_used)
-{
+storage_t make_mutable(storage_t st, u8 *registers_used) {
     switch (st.type) {
     case ST_IMMEDIATE: {
         assert(*registers_used < REGISTERS_COUNT);
@@ -717,8 +710,7 @@ storage_t make_mutable(storage_t st, u8 *registers_used)
     }
 }
 
-storage_t codegen(const node_t *n, u8 *registers_used)
-{
+storage_t codegen(const node_t *n, u8 *registers_used) {
     assert(NT_COUNT == 19);
 
     switch (n->type) {
@@ -1037,8 +1029,7 @@ storage_t codegen(const node_t *n, u8 *registers_used)
     }
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     if (argc != 2) {
         printf("incorrect number of arguments\n");
         return 1;
