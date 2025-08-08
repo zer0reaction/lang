@@ -1,0 +1,26 @@
+fn foo(x) {
+  := let diff + - 'z' 'a' 1
+  := let i 0
+
+  while < i x {
+    putchar(+ 'a' i)
+    := i + i 1
+  }
+
+  := i 0
+  while < i - diff x {
+    ; Right now you can't use global variables in a function
+    putchar('-')
+    := i + i 1
+  }
+
+  putchar('\n')
+
+  if > x 1 {
+    := x - x 1
+    foo(x)
+  }
+}
+
+:= let diff + - 'z' 'a' 1
+foo(diff)
