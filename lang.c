@@ -4,16 +4,28 @@
 #include <assert.h>
 #include <stdint.h>
 
+/* -------------------------------------------------------------------------------- */
+/* External libs                                                                    */
+/* -------------------------------------------------------------------------------- */
+
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
 #define ARENA_IMPLEMENTATION
 #include "arena.h"
 
+/* -------------------------------------------------------------------------------- */
+/* Preprocessor                                                                     */
+/* -------------------------------------------------------------------------------- */
+
 #define SCOPE_IDS_BUF_SIZE 32
 #define IDENT_NAME_MAX_LEN 32
 
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
+
+/* -------------------------------------------------------------------------------- */
+/* Global immutable variables                                                       */
+/* -------------------------------------------------------------------------------- */
 
 static const char *scratch_4b_registers[] = {
     "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d"
@@ -28,15 +40,23 @@ static const char *argument_registers[] = {
 };
 #define FUNCTION_ARGS_MAX (sizeof(argument_registers) / sizeof(*argument_registers))
 
-typedef uint8_t u8;
+/* -------------------------------------------------------------------------------- */
+/* Integer type defenitions                                                         */
+/* -------------------------------------------------------------------------------- */
+
+typedef uint8_t  u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 typedef uint64_t u64;
 
-typedef int8_t s8;
+typedef int8_t  s8;
 typedef int16_t s16;
 typedef int32_t s32;
 typedef int64_t s64;
+
+/* -------------------------------------------------------------------------------- */
+/* Token type                                                                       */
+/* -------------------------------------------------------------------------------- */
 
 typedef enum {
     TT_EMPTY = 0,
@@ -68,20 +88,51 @@ typedef struct {
     tt_t type;
     union {
         char ident_name[IDENT_NAME_MAX_LEN + 1];
-        s32 int_value;
+        s32  int_value;
     };
 } token_t;
 
 typedef struct {
     char *s;
-    tt_t t;
+    tt_t  t;
 } token_string_t;
+
+/* NOTE: this is here because of the type dependencies */
+static token_string_t token_strings[] = {
+    { .s = ":=",    .t = TT_COLUMN_EQUAL      },
+    { .s = "==",    .t = TT_CMP_EQ            },
+    { .s = "!=",    .t = TT_CMP_NEQ           },
+    { .s = "<=",    .t = TT_CMP_LESS_OR_EQ    },
+    { .s = ">=",    .t = TT_CMP_GREATER_OR_EQ },
+    { .s = "let",   .t = TT_LET               },
+    { .s = "while", .t = TT_WHILE             },
+    { .s = "if",    .t = TT_IF                },
+    { .s = "else",  .t = TT_ELSE              },
+    { .s = "fn",    .t = TT_FN                },
+    { .s = "+",     .t = TT_PLUS              },
+    { .s = "-",     .t = TT_MINUS             },
+    { .s = "<",     .t = TT_CMP_LESS          },
+    { .s = ">",     .t = TT_CMP_GREATER       },
+    { .s = "(",     .t = TT_ROUND_OPEN        },
+    { .s = ")",     .t = TT_ROUND_CLOSE       },
+    { .s = "{",     .t = TT_CURLY_OPEN        },
+    { .s = "}",     .t = TT_CURLY_CLOSE       }
+};
+#define TOKEN_STRINGS_COUNT (sizeof(token_strings) / sizeof(*token_strings))
+
+/* -------------------------------------------------------------------------------- */
+/* Symbol type                                                                      */
+/* -------------------------------------------------------------------------------- */
 
 typedef struct {
     char ident_name[IDENT_NAME_MAX_LEN + 1];
-    s32 stack_offset; /* negative value */
-    u32 scope_id;
+    s32  stack_offset; /* negative value */
+    u32  scope_id;
 } symbol_t;
+
+/* -------------------------------------------------------------------------------- */
+/* Node type                                                                        */
+/* -------------------------------------------------------------------------------- */
 
 typedef enum {
     NT_EMPTY = 0,
@@ -108,12 +159,12 @@ typedef enum {
 
 typedef struct node_t node_t;
 struct node_t {
-    nt_t type;
-    u32 table_id;
+    nt_t    type;
+    u32     table_id;
     node_t *next;
 
     union {
-        s32 int_value;
+        s32  int_value;
         char var_name[IDENT_NAME_MAX_LEN + 1];
         struct {
             node_t *while_cond;
@@ -125,7 +176,7 @@ struct node_t {
             node_t *else_body;
         };
         struct {
-            u32 scope_id;
+            u32     scope_id;
             node_t *scope_start;
         };
         struct {
@@ -133,14 +184,18 @@ struct node_t {
             node_t *rval;
         };
         struct {
-            char func_name[IDENT_NAME_MAX_LEN + 1];
+            char    func_name[IDENT_NAME_MAX_LEN + 1];
             node_t *args[FUNCTION_ARGS_MAX];
             node_t *func_body;
-            u8 args_count;
-            u8 allign_sub; /* positive value, subtracted from rsp before call */
+            u8      args_count;
+            u8      allign_sub; /* positive value, subtracted from rsp before call */
         };
     };
 };
+
+/* -------------------------------------------------------------------------------- */
+/* Storage type                                                                     */
+/* -------------------------------------------------------------------------------- */
 
 typedef enum {
     ST_NONE,
@@ -153,36 +208,22 @@ typedef struct {
     st_t type;
     union {
         u32 table_id;
-        u8 register_id;
+        u8  register_id;
         s32 int_value;
     };
 } storage_t;
 
+/* -------------------------------------------------------------------------------- */
+/* Global mutable variables                                                         */
+/* -------------------------------------------------------------------------------- */
+
 static symbol_t *table = NULL;
 
-static token_string_t token_strings[] = {
-    { .s = ":=",    .t = TT_COLUMN_EQUAL },
-    { .s = "==",    .t = TT_CMP_EQ },
-    { .s = "!=",    .t = TT_CMP_NEQ },
-    { .s = "<=",    .t = TT_CMP_LESS_OR_EQ },
-    { .s = ">=",    .t = TT_CMP_GREATER_OR_EQ },
-    { .s = "let",   .t = TT_LET },
-    { .s = "while", .t = TT_WHILE },
-    { .s = "if",    .t = TT_IF },
-    { .s = "else",  .t = TT_ELSE },
-    { .s = "fn",    .t = TT_FN },
-    { .s = "+",     .t = TT_PLUS },
-    { .s = "-",     .t = TT_MINUS },
-    { .s = "<",     .t = TT_CMP_LESS },
-    { .s = ">",     .t = TT_CMP_GREATER },
-    { .s = "(",     .t = TT_ROUND_OPEN },
-    { .s = ")",     .t = TT_ROUND_CLOSE },
-    { .s = "{",     .t = TT_CURLY_OPEN },
-    { .s = "}",     .t = TT_CURLY_CLOSE }
-};
-#define TOKEN_STRINGS_COUNT (sizeof(token_strings) / sizeof(*token_strings))
+/* -------------------------------------------------------------------------------- */
+/* Code                                                                             */
+/* -------------------------------------------------------------------------------- */
 
-#include "testing.c" /* weird, but ok */
+#include "testing.c"
 
 token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
