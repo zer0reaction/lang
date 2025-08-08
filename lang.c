@@ -33,7 +33,7 @@ static const char *scratch_4b_registers[] = {
 static const char *scratch_1b_registers[] = {
     "dil", "sil", "dl", "cl", "r8b", "r9b", "r10b", "r11b"
 };
-#define REGISTERS_COUNT (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
+#define SCRATCH_REGISTERS_COUNT (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
 
 static const char *argument_registers[] = {
     "edi", "esi", "edx", "ecx", "r8d", "r9d"
@@ -53,6 +53,8 @@ typedef int8_t  s8;
 typedef int16_t s16;
 typedef int32_t s32;
 typedef int64_t s64;
+
+typedef unsigned uint;
 
 /* -------------------------------------------------------------------------------- */
 /* Token type                                                                       */
@@ -206,6 +208,7 @@ typedef enum {
 
 typedef struct {
     st_t type;
+    bool is_intermediate; /* currently only register values */
     union {
         u32 table_id;
         u8  register_id;
@@ -218,6 +221,7 @@ typedef struct {
 /* -------------------------------------------------------------------------------- */
 
 static symbol_t *table = NULL;
+static bool registers_in_use[SCRATCH_REGISTERS_COUNT] = { 0 };
 
 /* -------------------------------------------------------------------------------- */
 /* Code                                                                             */
@@ -694,29 +698,63 @@ void unwrap_storage(storage_t st) {
     }
 }
 
+uint register_reserve(void) {
+    uint i;
+
+    for (i = 0; i < SCRATCH_REGISTERS_COUNT; i++) {
+        if (!registers_in_use[i]) {
+            registers_in_use[i] = true;
+            return i;
+        }
+    }
+
+    assert(0 && "reserve_register: not enough free registers");
+}
+
+void register_free(uint id) {
+    registers_in_use[id] = false;
+}
+
+void register_free_all(void) {
+    uint i;
+
+    for (i = 0; i < SCRATCH_REGISTERS_COUNT; i++) {
+        registers_in_use[i] = false;
+    }
+}
+
+/* TODO: create a storage table and storage_global_free() */
+void storage_free_intermediate(storage_t st) {
+    if (st.is_intermediate) {
+        register_free(st.register_id);
+    }
+}
+
 /*
   immediate -> move to register
   register  -> do nothing
   stack     -> move to register
 */
-storage_t move_to_register(storage_t st, u8 *registers_used) {
+storage_t move_to_register(storage_t st) {
     switch (st.type) {
     case ST_REGISTER: {
         return st;
     } break;
 
     case ST_IMMEDIATE: {
-        assert(*registers_used < REGISTERS_COUNT);
-        u8 register_id = (*registers_used)++;
+        u8 register_id = register_reserve();
         printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_4b_registers[register_id]);
-        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+        return (storage_t){ .type = ST_REGISTER,
+                            .is_intermediate = true,
+                            .register_id = register_id };
     } break;
 
     case ST_STACK: {
-        assert(*registers_used < REGISTERS_COUNT);
-        u8 register_id = (*registers_used)++;
+        u8 register_id = register_reserve();
         printf("\tmovl\t%d(%%rbp), %%%s\n", table[st.table_id].stack_offset, scratch_4b_registers[register_id]);
-        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+        return (storage_t){ .type = ST_REGISTER,
+                            .is_intermediate = true,
+                            .register_id = register_id };
     } break;
 
     default:
@@ -729,13 +767,14 @@ storage_t move_to_register(storage_t st, u8 *registers_used) {
   register  -> do nothing
   stack     -> do nothing
 */
-storage_t make_mutable(storage_t st, u8 *registers_used) {
+storage_t make_mutable(storage_t st) {
     switch (st.type) {
     case ST_IMMEDIATE: {
-        assert(*registers_used < REGISTERS_COUNT);
-        u8 register_id = (*registers_used)++;
+        u8 register_id = register_reserve();
         printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_4b_registers[register_id]);
-        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+        return (storage_t){ .type = ST_REGISTER,
+                            .is_intermediate = true,
+                            .register_id = register_id };
     } break;
 
     case ST_REGISTER: {
@@ -751,7 +790,7 @@ storage_t make_mutable(storage_t st, u8 *registers_used) {
     }
 }
 
-storage_t codegen(const node_t *n, u8 *registers_used) {
+storage_t codegen(const node_t *n) {
     assert(NT_COUNT == 19);
 
     switch (n->type) {
@@ -766,14 +805,13 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
     } break;
 
     case NT_ASSIGN: {
-        storage_t lval = codegen(n->lval, registers_used);
-        storage_t rval_init = codegen(n->rval, registers_used);
+        storage_t lval = codegen(n->lval);
+        storage_t rval_init = codegen(n->rval);
         assert(lval.type == ST_STACK && rval_init.type != ST_NONE);
 
         storage_t rval_proc = {0};
-
         if (rval_init.type == ST_STACK) {
-            rval_proc = move_to_register(rval_init, registers_used);
+            rval_proc = move_to_register(rval_init);
         } else {
             rval_proc = rval_init;
         }
@@ -784,15 +822,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval);
         printf("\n");
 
+        storage_free_intermediate(rval_proc);
         return rval_proc;
     } break;
 
     case NT_CMP_EQ: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tcmpl\t");
         unwrap_storage(rval);
@@ -804,15 +843,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_CMP_NEQ: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tcmpl\t");
         unwrap_storage(rval);
@@ -824,15 +864,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_CMP_LESS: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tcmpl\t");
         unwrap_storage(rval);
@@ -844,15 +885,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_CMP_LESS_OR_EQ: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tcmpl\t");
         unwrap_storage(rval);
@@ -864,15 +906,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_CMP_GREATER: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tcmpl\t");
         unwrap_storage(rval);
@@ -884,15 +927,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_CMP_GREATER_OR_EQ: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tcmpl\t");
         unwrap_storage(rval);
@@ -904,15 +948,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_SUM: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\taddl\t");
         unwrap_storage(rval);
@@ -920,15 +965,16 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_SUB: {
-        storage_t lval_init = codegen(n->lval, registers_used);
-        storage_t rval = codegen(n->rval, registers_used);
+        storage_t lval_init = codegen(n->lval);
+        storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init, registers_used);
+        storage_t lval_reg = move_to_register(lval_init);
 
         printf("\tsubl\t");
         unwrap_storage(rval);
@@ -936,19 +982,23 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         unwrap_storage(lval_reg);
         printf("\n");
 
+        storage_free_intermediate(rval);
         return lval_reg;
     } break;
 
     case NT_FUNC_CALL: {
         u8 storage_count = n->args_count;
 
+        /* TODO: registers can be overriden, fix! */
         for (u64 i = 0; i < storage_count; i++) {
-            storage_t st = codegen(n->args[i], registers_used);
+            storage_t st = codegen(n->args[i]);
             assert(st.type != ST_NONE);
 
             printf("\tmovl\t");
             unwrap_storage(st);
             printf(", %%%s\n", argument_registers[i]);
+
+            storage_free_intermediate(st);
         }
 
         if (n->allign_sub > 0) {
@@ -960,11 +1010,12 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
         }
 
         /* TODO: currently recursive function calls can modify the registers of the previous calls, too bad, FIX! */
-        assert(*registers_used < REGISTERS_COUNT);
-        u8 register_id = (*registers_used)++;
+        u8 register_id = register_reserve();
         printf("\tmovl\t%%eax, %%%s\n", scratch_4b_registers[register_id]);
 
-        return (storage_t){ .type = ST_REGISTER, .register_id = register_id };
+        return (storage_t){ .type = ST_REGISTER,
+                            .is_intermediate = true,
+                            .register_id = register_id };
     } break;
 
     case NT_FUNC_DECL: {
@@ -977,8 +1028,14 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
 
         node_t *current = n->func_body->scope_start;
         for (u64 i = 0; i < n->args_count; i++) {
+            storage_t st;
+
             printf("\tmovl\t%%%s, ", argument_registers[i]);
-            unwrap_storage(codegen(current, registers_used));
+
+            st = codegen(current);
+            unwrap_storage(st);
+            storage_free_intermediate(st);
+
             printf("\n");
             current = current->next;
         }
@@ -987,14 +1044,15 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
 
         while (current) {
             if (!current->next) {
-                return_val = codegen(current, registers_used);
+                return_val = codegen(current);
                 if (return_val.type != ST_NONE) {
                     printf("\tmovl\t");
                     unwrap_storage(return_val);
                     printf(", %%eax\n");
+                    storage_free_intermediate(return_val);
                 }
             } else {
-                codegen(current, registers_used);
+                storage_free_intermediate(codegen(current));
             }
             current = current->next;
         }
@@ -1007,10 +1065,10 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
     } break;
 
     case NT_SCOPE: {
-        *registers_used = 0;
+        register_free_all();
         node_t *current = n->scope_start;
         while (current) {
-            codegen(current, registers_used);
+            storage_free_intermediate(codegen(current));
             current = current->next;
         }
         return (storage_t){ .type = ST_NONE };
@@ -1021,35 +1079,36 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
 
         printf(".while_start_%u:\n", ident);
 
-        storage_t cond_init = codegen(n->while_cond, registers_used);
+        storage_t cond_init = codegen(n->while_cond);
         assert(cond_init.type != ST_NONE);
-        storage_t cond_mut = make_mutable(cond_init, registers_used);
+        storage_t cond_mut = make_mutable(cond_init);
 
         printf("\tcmpl\t$0, ");
         unwrap_storage(cond_mut);
         printf("\n");
         printf("\tjz\t.while_end_%u\n", ident);
 
-        codegen(n->while_body, registers_used);
+        storage_free_intermediate(codegen(n->while_body));
 
         printf("\tjmp\t.while_start_%u\n", ident);
         printf(".while_end_%u:\n", ident);
 
+        storage_free_intermediate(cond_mut);
         return (storage_t){ .type = ST_NONE };
     } break;
 
     case NT_IF: {
         u32 ident = rand(); /* TODO: can possibly collide */
 
-        storage_t cond_init = codegen(n->if_cond, registers_used);
+        storage_t cond_init = codegen(n->if_cond);
         assert(cond_init.type != ST_NONE);
-        storage_t cond_mut = make_mutable(cond_init, registers_used);
+        storage_t cond_mut = make_mutable(cond_init);
 
         printf("\tcmpl\t$0, ");
         unwrap_storage(cond_mut);
         printf("\n");
         printf("\tjz\t.if_end_%d\n", ident);
-        codegen(n->if_body, registers_used);
+        storage_free_intermediate(codegen(n->if_body));
         printf(".if_end_%d:\n", ident);
 
         if (n->else_body) {
@@ -1057,10 +1116,11 @@ storage_t codegen(const node_t *n, u8 *registers_used) {
             unwrap_storage(cond_mut);
             printf("\n");
             printf("\tjnz\t.else_end_%d\n", ident);
-            codegen(n->else_body, registers_used);
+            storage_free_intermediate(codegen(n->else_body));
             printf(".else_end_%d:\n", ident);
         }
 
+        storage_free_intermediate(cond_mut);
         return (storage_t){ .type = ST_NONE };
     } break;
 
@@ -1151,8 +1211,8 @@ int main(int argc, char *argv[]) {
 
     current_node = functions;
     while (current_node) {
-        u8 registers_used = 0;
-        codegen(current_node, &registers_used);
+        register_free_all();
+        storage_free_intermediate(codegen(current_node));
         current_node = current_node->next;
     }
 
@@ -1175,8 +1235,8 @@ int main(int argc, char *argv[]) {
 
     current_node = root;
     while (current_node) {
-        u8 registers_used = 0;
-        codegen(current_node, &registers_used);
+        register_free_all();
+        storage_free_intermediate(codegen(current_node));
         current_node = current_node->next;
     }
 
