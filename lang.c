@@ -38,7 +38,7 @@ static const char *scratch_1b_registers[] = {
 static const char *argument_registers[] = {
     "edi", "esi", "edx", "ecx", "r8d", "r9d"
 };
-#define FUNCTION_ARGS_MAX (sizeof(argument_registers) / sizeof(*argument_registers))
+#define ARGUMENT_REGISTERS_COUNT (sizeof(argument_registers) / sizeof(*argument_registers))
 
 /* -------------------------------------------------------------------------------- */
 /* Integer type defenitions                                                         */
@@ -187,7 +187,7 @@ struct node_t {
         };
         struct {
             char    func_name[IDENT_NAME_MAX_LEN + 1];
-            node_t *args[FUNCTION_ARGS_MAX];
+            node_t *args[ARGUMENT_REGISTERS_COUNT];
             node_t *func_body;
             u8      args_count;
             u8      allign_sub; /* positive value, subtracted from rsp before call */
@@ -406,7 +406,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a) {
 
             while (ts[*eaten].type != TT_ROUND_CLOSE) {
                 assert(arrlenu(ts) - *eaten > 1);
-                assert(n->args_count < FUNCTION_ARGS_MAX);
+                assert(n->args_count < ARGUMENT_REGISTERS_COUNT);
                 node_t *arg = parse(ts, eaten, a);
                 n->args[n->args_count++] = arg;
             }
@@ -434,7 +434,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a) {
 
         while (ts[*eaten].type != TT_ROUND_CLOSE) {
             assert(arrlenu(ts) - *eaten > 1);
-            assert(n->args_count < FUNCTION_ARGS_MAX);
+            assert(n->args_count < ARGUMENT_REGISTERS_COUNT);
             node_t *arg = parse(ts, eaten, a);
             assert(arg->type == NT_VAR);
             n->args[n->args_count++] = arg;
@@ -535,7 +535,7 @@ node_t *parse(const token_t *ts, u32 *eaten, Arena *a) {
     return n;
 }
 
-void scope_pass(node_t *n, u32 *scope_count) {
+void pass_set_scope_ids(node_t *n, u32 *scope_count) {
     assert(NT_COUNT == 19);
 
     if (!n) return;
@@ -543,20 +543,20 @@ void scope_pass(node_t *n, u32 *scope_count) {
     switch (n->type) {
     case NT_SCOPE: {
         n->scope_id = ++(*scope_count);
-        scope_pass(n->scope_start, scope_count);
+        pass_set_scope_ids(n->scope_start, scope_count);
     } break;
 
     case NT_WHILE: {
-        scope_pass(n->while_body, scope_count);
+        pass_set_scope_ids(n->while_body, scope_count);
     } break;
 
     case NT_IF: {
-        scope_pass(n->if_body, scope_count);
-        scope_pass(n->else_body, scope_count);
+        pass_set_scope_ids(n->if_body, scope_count);
+        pass_set_scope_ids(n->else_body, scope_count);
     } break;
 
     case NT_FUNC_DECL: {
-        scope_pass(n->func_body, scope_count);
+        pass_set_scope_ids(n->func_body, scope_count);
     } break;
 
     default:
@@ -564,10 +564,10 @@ void scope_pass(node_t *n, u32 *scope_count) {
         break;
     }
 
-    scope_pass(n->next, scope_count);
+    pass_set_scope_ids(n->next, scope_count);
 }
 
-void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Arena *a) {
+void pass_set_table_ids(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Arena *a) {
     assert(NT_COUNT == 19);
 
     if (!n) return;
@@ -620,7 +620,7 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Are
             new_scope_ids[i] = scope_ids[i];
         }
         new_scope_ids[size] = n->scope_id;
-        var_pass(n->scope_start, stack_offset, new_scope_ids, size + 1, a);
+        pass_set_table_ids(n->scope_start, stack_offset, new_scope_ids, size + 1, a);
     } break;
 
     case NT_SUM:
@@ -632,26 +632,26 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Are
     case NT_CMP_GREATER:
     case NT_CMP_GREATER_OR_EQ:
     case NT_ASSIGN: {
-        var_pass(n->lval, stack_offset, scope_ids, size, a);
-        var_pass(n->rval, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->lval, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->rval, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_WHILE: {
-        var_pass(n->while_cond, stack_offset, scope_ids, size, a);
-        var_pass(n->while_body, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->while_cond, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->while_body, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_IF: {
-        var_pass(n->if_cond, stack_offset, scope_ids, size, a);
-        var_pass(n->if_body, stack_offset, scope_ids, size, a);
-        var_pass(n->else_body, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->if_cond, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->if_body, stack_offset, scope_ids, size, a);
+        pass_set_table_ids(n->else_body, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_FUNC_CALL: {
         /* TODO: refactor, lame */
         n->allign_sub = ABSOLUTE(*stack_offset) + (16 - ABSOLUTE(*stack_offset) % 16) % 16;
         for (u64 i = 0; i < n->args_count; i++) {
-            var_pass(n->args[i], stack_offset, scope_ids, size, a);
+            pass_set_table_ids(n->args[i], stack_offset, scope_ids, size, a);
         }
     } break;
 
@@ -668,34 +668,14 @@ void var_pass(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Are
         }
 
         s32 func_stack = 0;
-        var_pass(n->func_body, &func_stack, scope_ids, size, a);
+        pass_set_table_ids(n->func_body, &func_stack, scope_ids, size, a);
     } break;
 
     default:
         break;
     }
 
-    var_pass(n->next, stack_offset, scope_ids, size, a);
-}
-
-void unwrap_storage(storage_t st) {
-    switch (st.type) {
-    case ST_STACK: {
-        printf("%d(%%rbp)", table[st.table_id].stack_offset);
-    } break;
-
-    case ST_REGISTER: {
-        printf("%%%s", scratch_4b_registers[st.register_id]);
-    } break;
-
-    case ST_IMMEDIATE: {
-        printf("$%d", st.int_value);
-    } break;
-
-    default: {
-        assert(0 && "unexpected storage type");
-    } break;
-    }
+    pass_set_table_ids(n->next, stack_offset, scope_ids, size, a);
 }
 
 uint register_reserve(void) {
@@ -723,10 +703,23 @@ void register_free_all(void) {
     }
 }
 
-/* TODO: create a storage table and storage_global_free() */
-void storage_free_intermediate(storage_t st) {
-    if (st.is_intermediate) {
-        register_free(st.register_id);
+void storage_unwrap(storage_t st) {
+    switch (st.type) {
+    case ST_STACK: {
+        printf("%d(%%rbp)", table[st.table_id].stack_offset);
+    } break;
+
+    case ST_REGISTER: {
+        printf("%%%s", scratch_4b_registers[st.register_id]);
+    } break;
+
+    case ST_IMMEDIATE: {
+        printf("$%d", st.int_value);
+    } break;
+
+    default: {
+        assert(0 && "unexpected storage type");
+    } break;
     }
 }
 
@@ -735,7 +728,7 @@ void storage_free_intermediate(storage_t st) {
   register  -> do nothing
   stack     -> move to register
 */
-storage_t move_to_register(storage_t st) {
+storage_t storage_move_to_register(storage_t st) {
     switch (st.type) {
     case ST_REGISTER: {
         return st;
@@ -743,7 +736,11 @@ storage_t move_to_register(storage_t st) {
 
     case ST_IMMEDIATE: {
         u8 register_id = register_reserve();
-        printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_4b_registers[register_id]);
+
+        printf("\tmovl\t$%d, %%%s\n",
+               st.int_value,
+               scratch_4b_registers[register_id]);
+
         return (storage_t){ .type = ST_REGISTER,
                             .is_intermediate = true,
                             .register_id = register_id };
@@ -751,7 +748,11 @@ storage_t move_to_register(storage_t st) {
 
     case ST_STACK: {
         u8 register_id = register_reserve();
-        printf("\tmovl\t%d(%%rbp), %%%s\n", table[st.table_id].stack_offset, scratch_4b_registers[register_id]);
+
+        printf("\tmovl\t%d(%%rbp), %%%s\n",
+               table[st.table_id].stack_offset,
+               scratch_4b_registers[register_id]);
+
         return (storage_t){ .type = ST_REGISTER,
                             .is_intermediate = true,
                             .register_id = register_id };
@@ -767,11 +768,15 @@ storage_t move_to_register(storage_t st) {
   register  -> do nothing
   stack     -> do nothing
 */
-storage_t make_mutable(storage_t st) {
+storage_t storage_make_mutable(storage_t st) {
     switch (st.type) {
     case ST_IMMEDIATE: {
         u8 register_id = register_reserve();
-        printf("\tmovl\t$%d, %%%s\n", st.int_value, scratch_4b_registers[register_id]);
+
+        printf("\tmovl\t$%d, %%%s\n",
+               st.int_value,
+               scratch_4b_registers[register_id]);
+
         return (storage_t){ .type = ST_REGISTER,
                             .is_intermediate = true,
                             .register_id = register_id };
@@ -787,6 +792,12 @@ storage_t make_mutable(storage_t st) {
 
     default:
         assert(0 && "unknown storage type");
+    }
+}
+
+void storage_free_intermediate(storage_t st) {
+    if (st.is_intermediate) {
+        register_free(st.register_id);
     }
 }
 
@@ -811,15 +822,15 @@ storage_t codegen(const node_t *n) {
 
         storage_t rval_proc = {0};
         if (rval_init.type == ST_STACK) {
-            rval_proc = move_to_register(rval_init);
+            rval_proc = storage_move_to_register(rval_init);
         } else {
             rval_proc = rval_init;
         }
 
         printf("\tmovl\t");
-        unwrap_storage(rval_proc);
+        storage_unwrap(rval_proc);
         printf(", ");
-        unwrap_storage(lval);
+        storage_unwrap(lval);
         printf("\n");
 
         storage_free_intermediate(rval_proc);
@@ -831,16 +842,16 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tcmpl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
         printf("\tsete\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -852,16 +863,16 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tcmpl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
         printf("\tsetne\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -873,16 +884,16 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tcmpl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
         printf("\tsetl\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -894,16 +905,16 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tcmpl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
         printf("\tsetle\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -915,16 +926,16 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tcmpl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
         printf("\tsetg\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -936,16 +947,16 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tcmpl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
         printf("\tsetge\t%%%s\n", scratch_1b_registers[lval_reg.register_id]);
         printf("\tandl\t$0xFF, ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -957,12 +968,12 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\taddl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -974,12 +985,12 @@ storage_t codegen(const node_t *n) {
         storage_t rval = codegen(n->rval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
-        storage_t lval_reg = move_to_register(lval_init);
+        storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tsubl\t");
-        unwrap_storage(rval);
+        storage_unwrap(rval);
         printf(", ");
-        unwrap_storage(lval_reg);
+        storage_unwrap(lval_reg);
         printf("\n");
 
         storage_free_intermediate(rval);
@@ -995,7 +1006,7 @@ storage_t codegen(const node_t *n) {
             assert(st.type != ST_NONE);
 
             printf("\tmovl\t");
-            unwrap_storage(st);
+            storage_unwrap(st);
             printf(", %%%s\n", argument_registers[i]);
 
             storage_free_intermediate(st);
@@ -1009,7 +1020,8 @@ storage_t codegen(const node_t *n) {
             printf("\taddq\t$%d, %%rsp\n", n->allign_sub); /* TODO: refactor, lame */
         }
 
-        /* TODO: currently recursive function calls can modify the registers of the previous calls, too bad, FIX! */
+        /* TODO: currently recursive function calls can modify
+           the registers of the previous calls, too bad, FIX! */
         u8 register_id = register_reserve();
         printf("\tmovl\t%%eax, %%%s\n", scratch_4b_registers[register_id]);
 
@@ -1033,7 +1045,7 @@ storage_t codegen(const node_t *n) {
             printf("\tmovl\t%%%s, ", argument_registers[i]);
 
             st = codegen(current);
-            unwrap_storage(st);
+            storage_unwrap(st);
             storage_free_intermediate(st);
 
             printf("\n");
@@ -1047,7 +1059,7 @@ storage_t codegen(const node_t *n) {
                 return_val = codegen(current);
                 if (return_val.type != ST_NONE) {
                     printf("\tmovl\t");
-                    unwrap_storage(return_val);
+                    storage_unwrap(return_val);
                     printf(", %%eax\n");
                     storage_free_intermediate(return_val);
                 }
@@ -1081,10 +1093,10 @@ storage_t codegen(const node_t *n) {
 
         storage_t cond_init = codegen(n->while_cond);
         assert(cond_init.type != ST_NONE);
-        storage_t cond_mut = make_mutable(cond_init);
+        storage_t cond_mut = storage_make_mutable(cond_init);
 
         printf("\tcmpl\t$0, ");
-        unwrap_storage(cond_mut);
+        storage_unwrap(cond_mut);
         printf("\n");
         printf("\tjz\t.while_end_%u\n", ident);
 
@@ -1102,10 +1114,10 @@ storage_t codegen(const node_t *n) {
 
         storage_t cond_init = codegen(n->if_cond);
         assert(cond_init.type != ST_NONE);
-        storage_t cond_mut = make_mutable(cond_init);
+        storage_t cond_mut = storage_make_mutable(cond_init);
 
         printf("\tcmpl\t$0, ");
-        unwrap_storage(cond_mut);
+        storage_unwrap(cond_mut);
         printf("\n");
         printf("\tjz\t.if_end_%d\n", ident);
         storage_free_intermediate(codegen(n->if_body));
@@ -1113,7 +1125,7 @@ storage_t codegen(const node_t *n) {
 
         if (n->else_body) {
             printf("\tcmpl\t$0, ");
-            unwrap_storage(cond_mut);
+            storage_unwrap(cond_mut);
             printf("\n");
             printf("\tjnz\t.else_end_%d\n", ident);
             storage_free_intermediate(codegen(n->else_body));
@@ -1188,13 +1200,13 @@ int main(int argc, char *argv[]) {
     }
 
     u32 scope_count = 0;
-    scope_pass(root, &scope_count);
-    scope_pass(functions, &scope_count);
+    pass_set_scope_ids(root, &scope_count);
+    pass_set_scope_ids(functions, &scope_count);
 
     s32 stack_offset = 0;
     u32 scope_ids[SCOPE_IDS_BUF_SIZE] = {0};
-    var_pass(root, &stack_offset, scope_ids, 1, &a);
-    var_pass(functions, &stack_offset, scope_ids, 1, &a);
+    pass_set_table_ids(root, &stack_offset, scope_ids, 1, &a);
+    pass_set_table_ids(functions, &stack_offset, scope_ids, 1, &a);
 
     /*
     print_tokens(ts);
