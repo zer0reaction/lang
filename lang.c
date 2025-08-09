@@ -827,6 +827,8 @@ storage_t codegen(const node_t *n) {
             rval_proc = rval_init;
         }
 
+        printf("\t/* := */\n");
+
         printf("\tmovl\t");
         storage_unwrap(rval_proc);
         printf(", ");
@@ -843,6 +845,8 @@ storage_t codegen(const node_t *n) {
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
+
+        printf("\t/* == */\n");
 
         printf("\tcmpl\t");
         storage_unwrap(rval);
@@ -865,6 +869,8 @@ storage_t codegen(const node_t *n) {
 
         storage_t lval_reg = storage_move_to_register(lval_init);
 
+        printf("\t/* != */\n");
+
         printf("\tcmpl\t");
         storage_unwrap(rval);
         printf(", ");
@@ -885,6 +891,8 @@ storage_t codegen(const node_t *n) {
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
+
+        printf("\t/* < */\n");
 
         printf("\tcmpl\t");
         storage_unwrap(rval);
@@ -907,6 +915,8 @@ storage_t codegen(const node_t *n) {
 
         storage_t lval_reg = storage_move_to_register(lval_init);
 
+        printf("\t/* <= */\n");
+
         printf("\tcmpl\t");
         storage_unwrap(rval);
         printf(", ");
@@ -927,6 +937,8 @@ storage_t codegen(const node_t *n) {
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
+
+        printf("\t/* > */\n");
 
         printf("\tcmpl\t");
         storage_unwrap(rval);
@@ -949,6 +961,8 @@ storage_t codegen(const node_t *n) {
 
         storage_t lval_reg = storage_move_to_register(lval_init);
 
+        printf("\t/* >= */\n");
+
         printf("\tcmpl\t");
         storage_unwrap(rval);
         printf(", ");
@@ -970,6 +984,8 @@ storage_t codegen(const node_t *n) {
 
         storage_t lval_reg = storage_move_to_register(lval_init);
 
+        printf("\t/* + */\n");
+
         printf("\taddl\t");
         storage_unwrap(rval);
         printf(", ");
@@ -987,6 +1003,8 @@ storage_t codegen(const node_t *n) {
 
         storage_t lval_reg = storage_move_to_register(lval_init);
 
+        printf("\t/* - */\n");
+
         printf("\tsubl\t");
         storage_unwrap(rval);
         printf(", ");
@@ -999,6 +1017,8 @@ storage_t codegen(const node_t *n) {
 
     case NT_FUNC_CALL: {
         u8 storage_count = n->args_count;
+
+        printf("\t/* %s() */\n", n->func_name);
 
         /* TODO: registers can be overriden, fix! */
         for (u64 i = 0; i < storage_count; i++) {
@@ -1089,6 +1109,8 @@ storage_t codegen(const node_t *n) {
     case NT_WHILE: {
         u32 ident = rand(); /* TODO: can possibly collide */
 
+        printf("\t/* while start */\n");
+
         printf(".while_start_%u:\n", ident);
 
         storage_t cond_init = codegen(n->while_cond);
@@ -1105,6 +1127,8 @@ storage_t codegen(const node_t *n) {
         printf("\tjmp\t.while_start_%u\n", ident);
         printf(".while_end_%u:\n", ident);
 
+        printf("\t/* while end */\n");
+
         storage_free_intermediate(cond_mut);
         return (storage_t){ .type = ST_NONE };
     } break;
@@ -1115,6 +1139,8 @@ storage_t codegen(const node_t *n) {
         storage_t cond_init = codegen(n->if_cond);
         assert(cond_init.type != ST_NONE);
         storage_t cond_mut = storage_make_mutable(cond_init);
+
+        printf("\t/* if start */\n");
 
         printf("\tcmpl\t$0, ");
         storage_unwrap(cond_mut);
@@ -1131,6 +1157,8 @@ storage_t codegen(const node_t *n) {
             storage_free_intermediate(codegen(n->else_body));
             printf(".else_end_%d:\n", ident);
         }
+
+        printf("\t/* if end */\n");
 
         storage_free_intermediate(cond_mut);
         return (storage_t){ .type = ST_NONE };
