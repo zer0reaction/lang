@@ -11,15 +11,13 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
-#define ARENA_IMPLEMENTATION
-#include "arena.h"
-
 /* -------------------------------------------------------------------------------- */
 /* Preprocessor                                                                     */
 /* -------------------------------------------------------------------------------- */
 
 #define SCOPE_IDS_BUF_SIZE 32
 #define IDENT_NAME_MAX_LEN 32
+#define ARENA_REGION_DEFAULT_CAPACITY (4 * 1024)
 
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
 
@@ -217,6 +215,24 @@ typedef struct {
 } storage_t;
 
 /* -------------------------------------------------------------------------------- */
+/* Arena type                                                                       */
+/* -------------------------------------------------------------------------------- */
+
+typedef struct arena_region_t arena_region_t;
+
+struct arena_region_t {
+    u64             used;
+    u64             capacity;
+    arena_region_t *next;
+    u8              data[];
+};
+
+typedef struct {
+    arena_region_t *head;
+    arena_region_t *tail;
+} arena_t;
+
+/* -------------------------------------------------------------------------------- */
 /* Global mutable variables                                                         */
 /* -------------------------------------------------------------------------------- */
 
@@ -228,6 +244,48 @@ static bool registers_in_use[SCRATCH_REGISTERS_COUNT] = { 0 };
 /* -------------------------------------------------------------------------------- */
 
 #include "testing.c"
+
+arena_region_t *arena__region_create(u64 n) {
+    arena_region_t *r = NULL;
+
+    if (n > ARENA_REGION_DEFAULT_CAPACITY) {
+        r = malloc(sizeof *r + n);
+    } else {
+        r = malloc(sizeof *r + ARENA_REGION_DEFAULT_CAPACITY);
+    }
+    memset(r, 0, sizeof *r);
+
+    return r;
+}
+
+void *arena_alloc(arena_t *a, u64 n) {
+    void *ptr = NULL;
+
+    if (!a->tail) {
+        arena_region_t *r = arena__region_create(n);
+        a->head = a->tail = r;
+        return r->data;
+    } else if (a->tail->used + n > a->tail->capacity) {
+        arena_region_t *r = arena__region_create(n);
+        a->tail->next = r;
+        a->tail = r;
+        return r->data;
+    }
+
+    ptr = &a->tail->data[a->tail->used];
+    a->tail->used += n;
+    return ptr;
+}
+
+void arena_free(arena_t *a) {
+    arena_region_t *current = a->head;
+
+    while (current) {
+        arena_region_t *next = current->next;
+        free(current);
+        current = next;
+    }
+}
 
 token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
@@ -348,7 +406,7 @@ token_t *tokenize(const char *s, u64 len) {
     return ts;
 }
 
-node_t *parse(const token_t *ts, u32 *eaten, Arena *a) {
+node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
     assert(TT_COUNT == 22);
     assert(NT_COUNT == 19);
 
@@ -567,7 +625,7 @@ void pass_set_scope_ids(node_t *n, u32 *scope_count) {
     pass_set_scope_ids(n->next, scope_count);
 }
 
-void pass_set_table_ids(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, Arena *a) {
+void pass_set_table_ids(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, arena_t *a) {
     assert(NT_COUNT == 19);
 
     if (!n) return;
@@ -1176,7 +1234,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    Arena a = {0};
+    arena_t a = {0};
 
     FILE *fp = fopen(argv[1], "r");
     if (!fp) {
