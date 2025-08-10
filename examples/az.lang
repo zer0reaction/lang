@@ -1,26 +1,29 @@
-fn foo(x) {
-  := let diff + - 'z' 'a' 1
-  := let i 0
+fn abc_len() {
+  'z' - 'a' + 1;
+}
 
-  while < i x {
-    putchar(+ 'a' i)
-    := i + i 1
+fn az(n) {
+  let c_current := 'a';
+  let c_goal := 'a' + n - 1;
+  while c_current <= c_goal {
+    putchar(c_current);
+    c_current := c_current + 1;
   }
 
-  := i 0
-  while < i - diff x {
-    ; Right now you can't use global variables in a function
-    putchar('-')
-    := i + i 1
+  let i := 1;
+  let temp := abc_len();
+  while i <= temp - n {
+    putchar('-');
+    i := i + 1;
   }
 
-  putchar('\n')
+  putchar('\n');
 
-  if > x 1 {
-    := x - x 1
-    foo(x)
+  if n > 1 {
+    n := n - 1;
+    az(n);
   }
 }
 
-:= let diff + - 'z' 'a' 1
-foo(diff)
+let temp := abc_len();
+az(temp);

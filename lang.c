@@ -252,6 +252,17 @@ typedef struct {
 } arena_t;
 
 /* -------------------------------------------------------------------------------- */
+/* Operator priority type                                                           */
+/* -------------------------------------------------------------------------------- */
+
+typedef enum {
+    OP_PRIORITY_UNARY          = 0,
+    OP_PRIORITY_BINARY_ADD_SUB = 1,
+    OP_PRIORITY_BINARY_COMP    = 2,
+    OP_PRIORITY_BINARY_ASSIGN  = 3
+} op_priority_t;
+
+/* -------------------------------------------------------------------------------- */
 /* Global mutable variables                                                         */
 /* -------------------------------------------------------------------------------- */
 
@@ -417,17 +428,16 @@ token_t *tokenize(const char *s, u64 len) {
     return ts;
 }
 
-/* TODO: create an enum for operator priorities */
-int operator_get_priority(token_t t) {
+op_priority_t operator_get_priority(token_t t) {
     switch (t.type) {
         /* 0) left to right */
     case TT_LET:
-        return 0;
+        return OP_PRIORITY_UNARY;
 
         /* 1) left to right */
     case TT_PLUS:
     case TT_MINUS:
-        return 1;
+        return OP_PRIORITY_BINARY_ADD_SUB;
 
         /* 2) left to right */
     case TT_CMP_LESS:
@@ -436,11 +446,11 @@ int operator_get_priority(token_t t) {
     case TT_CMP_GREATER_OR_EQ:
     case TT_CMP_EQ:
     case TT_CMP_NEQ:
-        return 2;
+        return OP_PRIORITY_BINARY_COMP;
 
         /* 3) right to left */
     case TT_COLUMN_EQUAL:
-        return 3;
+        return OP_PRIORITY_BINARY_ASSIGN;
 
         /* -1 on error */
     default:
@@ -537,18 +547,26 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
         uint rhs_start, rhs_len;
         node_t *n = arena_alloc_initz(a, sizeof *n);
 
-        /* TODO: implement direction of evaluation */
-
         for (i = start; i < start + len; i++) {
             int priority = operator_get_priority(ts[i]);
-            if (priority > lowest_priority) {
+            if (priority >= lowest_priority) {
                 lowest_priority = priority;
-                op_ind = i;
+                op_ind = i;     /* for left-to-right evaluation */
             }
         }
         assert(lowest_priority >= 0);
 
         /* assuming that all the operations are binary at this point */
+
+        /* right now ':=' is the only operator with right-to-left evaluation */
+        if (lowest_priority == OP_PRIORITY_BINARY_ASSIGN) {
+            for (i = start; i < start + len; i++) {
+                if ((int)operator_get_priority(ts[i]) == lowest_priority) {
+                    op_ind = i;
+                    break;
+                }
+            }
+        }
 
         lhs_start = start;
         lhs_len = op_ind - start;
