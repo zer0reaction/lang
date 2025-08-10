@@ -81,6 +81,8 @@ typedef enum {
     TT_ROUND_CLOSE,
     TT_CURLY_OPEN,
     TT_CURLY_CLOSE,
+    TT_SEMICOLON,
+    TT_COMMA,
     TT_COUNT
 } tt_t;
 
@@ -116,7 +118,9 @@ static token_string_t token_strings[] = {
     { .s = "(",     .t = TT_ROUND_OPEN        },
     { .s = ")",     .t = TT_ROUND_CLOSE       },
     { .s = "{",     .t = TT_CURLY_OPEN        },
-    { .s = "}",     .t = TT_CURLY_CLOSE       }
+    { .s = "}",     .t = TT_CURLY_CLOSE       },
+    { .s = ";",     .t = TT_SEMICOLON         },
+    { .s = ",",     .t = TT_COMMA             }
 };
 #define TOKEN_STRINGS_COUNT (sizeof(token_strings) / sizeof(*token_strings))
 
@@ -292,6 +296,12 @@ void *arena_alloc(arena_t *a, u64 n) {
     return ptr;
 }
 
+void *arena_alloc_initz(arena_t *a, u64 n) {
+    void *ptr = arena_alloc(a, n);
+    memset(ptr, 0, n);
+    return ptr;
+}
+
 void arena_free(arena_t *a) {
     arena_region_t *current = a->head;
 
@@ -305,23 +315,10 @@ void arena_free(arena_t *a) {
 token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
     token_t *ts = NULL;
-    bool is_comment = false;
 
-    assert(TT_COUNT == 22);
+    assert(TT_COUNT == 24);
 
     while (i < len) {
-        /* comments */
-        if (s[i] == ';') {
-            is_comment = true;
-        }
-        else if (is_comment && s[i] == '\n') {
-            is_comment = false;
-        }
-        if (is_comment) {
-            i += 1;
-            continue;
-        }
-
         /* blank characters */
         if (s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
             i += 1;
@@ -414,81 +411,233 @@ token_t *tokenize(const char *s, u64 len) {
             continue;
         }
 
-        printf("%s", &s[i]);
         assert(0 && "unexpected character");
     }
 
     return ts;
 }
 
+/* TODO: create an enum for operator priorities */
+int operator_get_priority(token_t t) {
+    switch (t.type) {
+        /* 0) left to right */
+    case TT_LET:
+        return 0;
+
+        /* 1) left to right */
+    case TT_PLUS:
+    case TT_MINUS:
+        return 1;
+
+        /* 2) left to right */
+    case TT_CMP_LESS:
+    case TT_CMP_GREATER:
+    case TT_CMP_LESS_OR_EQ:
+    case TT_CMP_GREATER_OR_EQ:
+    case TT_CMP_EQ:
+    case TT_CMP_NEQ:
+        return 2;
+
+        /* 3) right to left */
+    case TT_COLUMN_EQUAL:
+        return 3;
+
+        /* -1 on error */
+    default:
+        return -1;
+    }
+}
+
+uint token_length_to_type(const token_t *ts, uint start, tt_t type) {
+    uint len = 0;
+
+    while (ts[start + len].type != type) {
+        assert(start + len < arrlenu(ts));
+        len++;
+    }
+
+    return len;
+}
+
+node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
+    if (len == 1) {
+        node_t *n = arena_alloc_initz(a, sizeof *n);
+
+        switch (ts[start].type) {
+        case TT_CHAR_LITERAL:
+        case TT_INT_LITERAL:
+            n->type = NT_INT;
+            n->int_value = ts[start].int_value;
+            break;
+
+        case TT_IDENT:
+            n->type = NT_VAR;
+            strcpy(n->var_name, ts[start].ident_name);
+            break;
+
+        default:
+            assert(0 && "unexpected token in statement (parsing 1 token)");
+        }
+
+        return n;
+    } else if (len == 2) {
+        node_t *n = arena_alloc_initz(a, sizeof *n);
+
+        switch (ts[start].type) {
+        case TT_LET:
+            assert(ts[start + 1].type == TT_IDENT);
+            n->type = NT_VAR_DECL;
+            strcpy(n->var_name, ts[start + 1].ident_name);
+            break;
+
+        default:
+            assert(0 && "unexpected token in statement (parsing 2 tokens)");
+        }
+
+        return n;
+    } else if (len >= 3 && ts[start + 1].type == TT_ROUND_OPEN) {
+        node_t *n = arena_alloc_initz(a, sizeof *n);
+
+        n->type = NT_FUNC_CALL;
+        strcpy(n->func_name, ts[start].ident_name);
+        start += 2;
+
+        while (ts[start].type != TT_ROUND_CLOSE) {
+            uint arg_len = 0;
+            node_t *arg = NULL;
+
+            assert(arrlenu(ts) - start > 1);
+            assert(n->args_count < ARGUMENT_REGISTERS_COUNT);
+
+            while (ts[start + arg_len].type != TT_COMMA &&
+                   ts[start + arg_len].type != TT_ROUND_CLOSE) {
+
+                arg_len += 1;
+            }
+
+            arg = parse_statement(ts, start, arg_len, a);
+
+            if (ts[start + arg_len].type == TT_COMMA) {
+                start += arg_len + 1;
+            } else {
+                start += arg_len;
+            }
+
+            n->args[n->args_count++] = arg;
+        }
+
+        return n;
+    }
+
+    {
+        u64 i = 0;
+        int lowest_priority = -1;
+        uint op_ind;
+        uint lhs_start, lhs_len;
+        uint rhs_start, rhs_len;
+        node_t *n = arena_alloc_initz(a, sizeof *n);
+
+        /* TODO: implement direction of evaluation */
+
+        for (i = start; i < start + len; i++) {
+            int priority = operator_get_priority(ts[i]);
+            if (priority > lowest_priority) {
+                lowest_priority = priority;
+                op_ind = i;
+            }
+        }
+        assert(lowest_priority >= 0);
+
+        /* assuming that all the operations are binary at this point */
+
+        lhs_start = start;
+        lhs_len = op_ind - start;
+        rhs_start = op_ind + 1;
+        rhs_len = (start + len) - (op_ind + 1);
+
+        switch (ts[op_ind].type) {
+        case TT_COLUMN_EQUAL:
+            n->type = NT_ASSIGN;
+            break;
+
+        case TT_CMP_EQ:
+            n->type = NT_CMP_EQ;
+            break;
+
+        case TT_CMP_NEQ:
+            n->type = NT_CMP_NEQ;
+            break;
+
+        case TT_CMP_LESS:
+            n->type = NT_CMP_LESS;
+            break;
+
+        case TT_CMP_LESS_OR_EQ:
+            n->type = NT_CMP_LESS_OR_EQ;
+            break;
+
+        case TT_CMP_GREATER:
+            n->type = NT_CMP_GREATER;
+            break;
+
+        case TT_CMP_GREATER_OR_EQ:
+            n->type = NT_CMP_GREATER_OR_EQ;
+            break;
+
+        case TT_PLUS:
+            n->type = NT_SUM;
+            break;
+
+        case TT_MINUS:
+            n->type = NT_SUB;
+            break;
+
+        default:
+            assert(0 && "invalid binary operation type");
+        }
+
+        n->lval = parse_statement(ts, lhs_start, lhs_len, a);
+        n->rval = parse_statement(ts, rhs_start, rhs_len, a);
+
+        return n;
+    }
+}
+
 node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
-    assert(TT_COUNT == 22);
+    assert(TT_COUNT == 24);
     assert(NT_COUNT == 19);
 
     assert(*eaten < arrlenu(ts));
 
-    node_t *n = arena_alloc(a, sizeof(*n));
-    memset(n, 0, sizeof(*n));
+    node_t *n = arena_alloc_initz(a, sizeof(*n));
 
     switch (ts[*eaten].type) {
-    case TT_INT_LITERAL: {
-        n->type = NT_INT;
-        n->int_value = ts[*eaten].int_value;
-        *eaten += 1;
-    } break;
-
-    case TT_CHAR_LITERAL: {
-        n->type = NT_CHAR;
-        n->int_value = ts[*eaten].int_value;
-        *eaten += 1;
-    } break;
-
-    case TT_LET: {
-        assert(arrlenu(ts) - *eaten >= 2);
-        assert(ts[*eaten + 1].type == TT_IDENT);
-
-        n->type = NT_VAR_DECL;
-        strcpy(n->var_name, ts[*eaten + 1].ident_name);
-        *eaten += 2;
-    } break;
-
     case TT_WHILE: {
+        uint len = 0;
+
         n->type = NT_WHILE;
         *eaten += 1;
-        n->while_cond = parse(ts, eaten, a);
+        len = token_length_to_type(ts, *eaten, TT_CURLY_OPEN);
+
+        n->while_cond = parse_statement(ts, *eaten, len, a);
+        *eaten += len;
         n->while_body = parse(ts, eaten, a);
     } break;
 
     case TT_IF: {
+        uint len = 0;
+
         n->type = NT_IF;
         *eaten += 1;
-        n->if_cond = parse(ts, eaten, a);
+        len = token_length_to_type(ts, *eaten, TT_CURLY_OPEN);
+
+        n->if_cond = parse_statement(ts, *eaten, len, a);
+        *eaten += len;
         n->if_body = parse(ts, eaten, a);
 
         if (*eaten < arrlenu(ts) && ts[*eaten].type == TT_ELSE) {
             *eaten += 1;
             n->else_body = parse(ts, eaten, a);
-        }
-    } break;
-
-    case TT_IDENT: {
-        if (arrlenu(ts) - *eaten >= 3 && ts[*eaten + 1].type == TT_ROUND_OPEN) {
-            n->type = NT_FUNC_CALL;
-            strcpy(n->func_name, ts[*eaten].ident_name);
-            *eaten += 2;
-
-            while (ts[*eaten].type != TT_ROUND_CLOSE) {
-                assert(arrlenu(ts) - *eaten > 1);
-                assert(n->args_count < ARGUMENT_REGISTERS_COUNT);
-                node_t *arg = parse(ts, eaten, a);
-                n->args[n->args_count++] = arg;
-            }
-
-            *eaten += 1;
-        } else {
-            n->type = NT_VAR;
-            strcpy(n->var_name, ts[*eaten].ident_name);
-            *eaten += 1;
         }
     } break;
 
@@ -506,79 +655,33 @@ node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
         *eaten += 1;
 
         while (ts[*eaten].type != TT_ROUND_CLOSE) {
+            uint arg_len = 0;
+            node_t *arg = NULL;
+
             assert(arrlenu(ts) - *eaten > 1);
             assert(n->args_count < ARGUMENT_REGISTERS_COUNT);
-            node_t *arg = parse(ts, eaten, a);
+
+            while (ts[*eaten + arg_len].type != TT_COMMA &&
+                   ts[*eaten + arg_len].type != TT_ROUND_CLOSE) {
+
+                arg_len += 1;
+            }
+
+            arg = parse_statement(ts, *eaten, arg_len, a);
             assert(arg->type == NT_VAR);
+
+            if (ts[*eaten + arg_len].type == TT_COMMA) {
+                *eaten += arg_len + 1;
+            } else {
+                *eaten += arg_len;
+            }
+
             n->args[n->args_count++] = arg;
         }
         *eaten += 1;
 
         n->func_body = parse(ts, eaten, a);
         assert(n->func_body->type == NT_SCOPE);
-    } break;
-
-    case TT_COLUMN_EQUAL: {
-        n->type = NT_ASSIGN;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_CMP_EQ: {
-        n->type = NT_CMP_EQ;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_CMP_NEQ: {
-        n->type = NT_CMP_NEQ;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_CMP_LESS: {
-        n->type = NT_CMP_LESS;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_CMP_LESS_OR_EQ: {
-        n->type = NT_CMP_LESS_OR_EQ;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_CMP_GREATER: {
-        n->type = NT_CMP_GREATER;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_CMP_GREATER_OR_EQ: {
-        n->type = NT_CMP_GREATER_OR_EQ;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_PLUS: {
-        n->type = NT_SUM;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
-    } break;
-
-    case TT_MINUS: {
-        n->type = NT_SUB;
-        *eaten += 1;
-        n->lval = parse(ts, eaten, a);
-        n->rval = parse(ts, eaten, a);
     } break;
 
     case TT_CURLY_OPEN: {
@@ -600,8 +703,9 @@ node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
     } break;
 
     default: {
-        printf("%d\n", ts[*eaten].type);
-        assert(0 && "unknown token");
+        uint statement_len = token_length_to_type(ts, *eaten, TT_SEMICOLON);
+        n = parse_statement(ts, *eaten, statement_len, a);
+        *eaten += statement_len + 1;
     } break;
     }
 
@@ -730,8 +834,7 @@ void pass_set_table_ids(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32
 
     case NT_FUNC_DECL: {
         for (s64 i = n->args_count - 1; i >= 0; i--) {
-            node_t *var_decl = arena_alloc(a, sizeof(*var_decl));
-            memset(var_decl, 0, sizeof(*var_decl));
+            node_t *var_decl = arena_alloc_initz(a, sizeof(*var_decl));
 
             var_decl->type = NT_VAR_DECL;
             strcpy(var_decl->var_name, n->args[i]->var_name);
