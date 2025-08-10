@@ -160,29 +160,44 @@ typedef enum {
 typedef struct node_t node_t;
 struct node_t {
     nt_t    type;
-    u32     table_id;
     node_t *next;
 
     union {
+        /* integer literal */
         s32  int_value;
-        char var_name[IDENT_NAME_MAX_LEN + 1];
+
+        /* variable */
+        struct {
+            u32  table_id;
+            char var_name[IDENT_NAME_MAX_LEN + 1];
+        };
+
+        /* while */
         struct {
             node_t *while_cond;
             node_t *while_body;
         };
+
+        /* if */
         struct {
             node_t *if_cond;
             node_t *if_body;
             node_t *else_body;
         };
+
+        /* scope */
         struct {
             u32     scope_id;
             node_t *scope_start;
         };
+
+        /* binary operator */
         struct {
             node_t *lval;
             node_t *rval;
         };
+
+        /* function defenition/call */
         struct {
             char    func_name[IDENT_NAME_MAX_LEN + 1];
             node_t *args[ARGUMENT_REGISTERS_COUNT];
