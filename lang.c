@@ -166,7 +166,7 @@ struct node_t {
     nt_t    type;
     node_t *next;
     u32     table_id;
-    bool    is_generated;          /* currently only used for functions */
+    bool    is_generated; /* currently only used for functions */
 
     union {
         /* integer literal */
@@ -631,8 +631,8 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
             assert(0 && "invalid binary operation type");
         }
 
-        n->lval = parse_statement(ts, lhs_start, lhs_len, a);
         n->rval = parse_statement(ts, rhs_start, rhs_len, a);
+        n->lval = parse_statement(ts, lhs_start, lhs_len, a);
 
         return n;
     }
@@ -847,8 +847,8 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
     case NT_CMP_GREATER:
     case NT_CMP_GREATER_OR_EQ:
     case NT_ASSIGN: {
-        pass_populate_table(n->lval, stack_offset, scope_ids, size, a);
         pass_populate_table(n->rval, stack_offset, scope_ids, size, a);
+        pass_populate_table(n->lval, stack_offset, scope_ids, size, a);
     } break;
 
     case NT_WHILE: {
@@ -1043,8 +1043,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_ASSIGN: {
-        storage_t lval = codegen(n->lval);
         storage_t rval_init = codegen(n->rval);
+        storage_t lval = codegen(n->lval);
 
         assert((lval.type == ST_STACK || lval.type == ST_BSS) &&
                rval_init.type != ST_NONE);
@@ -1067,8 +1067,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_CMP_EQ: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1088,8 +1088,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_CMP_NEQ: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1109,8 +1109,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_CMP_LESS: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1130,8 +1130,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_CMP_LESS_OR_EQ: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1151,8 +1151,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_CMP_GREATER: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1172,8 +1172,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_CMP_GREATER_OR_EQ: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1193,8 +1193,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_SUM: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);
@@ -1210,8 +1210,8 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_SUB: {
-        storage_t lval_init = codegen(n->lval);
         storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
         assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
 
         storage_t lval_reg = storage_move_to_register(lval_init);

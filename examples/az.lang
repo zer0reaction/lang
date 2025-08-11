@@ -1,6 +1,4 @@
-fn abc_len() {
-  'z' - 'a' + 1;
-}
+let abc_len := 'z' - 'a' + 1;
 
 fn az(n) {
   let c_current := 'a';
@@ -11,8 +9,7 @@ fn az(n) {
   }
 
   let i := 1;
-  let temp := abc_len();
-  while i <= temp - n {
+  while i <= abc_len - n {
     putchar('-');
     i := i + 1;
   }
@@ -25,5 +22,4 @@ fn az(n) {
   }
 }
 
-let temp := abc_len();
-az(temp);
+az(abc_len);
