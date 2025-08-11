@@ -996,6 +996,8 @@ void storage_free_intermediate(storage_t st) {
 }
 
 storage_t codegen(const node_t *n) {
+    static uint local_label_count = 0;
+
     assert(NT_COUNT == 19);
 
     switch (n->type) {
@@ -1281,7 +1283,7 @@ storage_t codegen(const node_t *n) {
     } break;
 
     case NT_WHILE: {
-        u32 ident = rand(); /* TODO: can possibly collide */
+        u32 ident = local_label_count++;
 
         printf(".while_start_%u:\n", ident);
 
@@ -1304,7 +1306,8 @@ storage_t codegen(const node_t *n) {
     } break;
 
     case NT_IF: {
-        u32 ident = rand(); /* TODO: can possibly collide */
+        u32 ident = local_label_count++;
+        bool has_else = (n->else_body != NULL);
 
         storage_t cond_init = codegen(n->if_cond);
         assert(cond_init.type != ST_NONE);
@@ -1313,18 +1316,20 @@ storage_t codegen(const node_t *n) {
         printf("\tcmpl\t$0, ");
         storage_unwrap(cond_mut);
         printf("\n");
-        printf("\tjz\t.if_end_%d\n", ident);
-        storage_free_intermediate(codegen(n->if_body));
-        printf(".if_end_%d:\n", ident);
 
-        if (n->else_body) {
-            printf("\tcmpl\t$0, ");
-            storage_unwrap(cond_mut);
-            printf("\n");
-            printf("\tjnz\t.else_end_%d\n", ident);
+        if (has_else) {
+            printf("\tjz\t.else_start_%d\n", ident);
+            storage_free_intermediate(codegen(n->if_body));
+            printf("\tjmp\t.if_end_%d\n", ident);
+
+            printf(".else_start_%d:\n", ident);
             storage_free_intermediate(codegen(n->else_body));
-            printf(".else_end_%d:\n", ident);
+        } else {
+            printf("\tjz\t.if_end_%d\n", ident);
+            storage_free_intermediate(codegen(n->if_body));
         }
+
+        printf(".if_end_%d:\n", ident);
 
         storage_free_intermediate(cond_mut);
         return (storage_t){ .type = ST_NONE };
