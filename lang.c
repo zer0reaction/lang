@@ -124,6 +124,7 @@ typedef enum {
     TT_MINUS,
     TT_STAR,
     TT_SLASH,
+    TT_PERCENT,
     TT_LET,
     TT_WHILE,
     TT_IF,
@@ -167,6 +168,7 @@ static token_string_t token_strings[] = {
     { .s = "-",     .t = TT_MINUS             },
     { .s = "*",     .t = TT_STAR              },
     { .s = "/",     .t = TT_SLASH             },
+    { .s = "%",     .t = TT_PERCENT           },
     { .s = "<",     .t = TT_CMP_LESS          },
     { .s = ">",     .t = TT_CMP_GREATER       },
     { .s = "(",     .t = TT_ROUND_OPEN        },
@@ -204,6 +206,7 @@ typedef enum {
     NT_SUB,
     NT_MULT,
     NT_DIV,
+    NT_MOD,
     NT_COUNT
 } nt_t;
 
@@ -391,7 +394,7 @@ token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 26);
+    assert(TT_COUNT == 27);
 
     while (i < len) {
         /* blank characters */
@@ -501,6 +504,7 @@ op_priority_t operator_get_priority(token_t t) {
         /* left to right */
     case TT_STAR:
     case TT_SLASH:
+    case TT_PERCENT:
         return OP_PRIORITY_BINARY_MULT_DIV_REM;
 
         /* left to right */
@@ -539,8 +543,8 @@ uint token_length_to_type(const token_t *ts, uint start, tt_t type) {
 }
 
 node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
-    assert(TT_COUNT == 26);
-    assert(NT_COUNT == 21);
+    assert(TT_COUNT == 27);
+    assert(NT_COUNT == 22);
 
     if (len == 1) {
         node_t *n = arena_alloc_initz(a, sizeof *n);
@@ -690,6 +694,10 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
             n->type = NT_DIV;
             break;
 
+        case TT_PERCENT:
+            n->type = NT_MOD;
+            break;
+
         default:
             assert(0 && "invalid binary operation type");
         }
@@ -702,8 +710,8 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
 }
 
 node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
-    assert(TT_COUNT == 26);
-    assert(NT_COUNT == 21);
+    assert(TT_COUNT == 27);
+    assert(NT_COUNT == 22);
 
     assert(*eaten < arrlenu(ts));
 
@@ -811,7 +819,7 @@ node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
 }
 
 void pass_set_scope_ids(node_t *n, u32 *scope_count) {
-    assert(NT_COUNT == 21);
+    assert(NT_COUNT == 22);
 
     if (!n) return;
 
@@ -843,7 +851,7 @@ void pass_set_scope_ids(node_t *n, u32 *scope_count) {
 }
 
 void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, arena_t *a) {
-    assert(NT_COUNT == 21);
+    assert(NT_COUNT == 22);
 
     if (!n) return;
 
@@ -905,6 +913,7 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
     case NT_SUB:
     case NT_MULT:
     case NT_DIV:
+    case NT_MOD:
     case NT_CMP_EQ:
     case NT_CMP_NEQ:
     case NT_CMP_LESS:
@@ -1085,7 +1094,7 @@ void storage_free_intermediate(storage_t st) {
 storage_t codegen(node_t *n) {
     static uint local_label_count = 0;
 
-    assert(NT_COUNT == 21);
+    assert(NT_COUNT == 22);
 
     if (n->is_generated) {
         return (storage_t){ .type = ST_NONE };
@@ -1334,13 +1343,59 @@ storage_t codegen(node_t *n) {
 
         printf("\tmovl\t");
         storage_unwrap(lval);
-        printf("\t, %%eax\n");
+        printf(", %%eax\n");
 
         printf("\tidiv\t");
         storage_unwrap(rval_reg);
         printf("\n");
 
         printf("\tmovl\t%%eax, ");
+        storage_unwrap(rval_reg);
+        printf("\n");
+
+        if (edx_in_use) {
+            printf("\tmovl\t%%%s, %%edx\n",
+                   scratch_4b_registers[register_id]);
+            register_free(register_id);
+        }
+
+        storage_free_intermediate(lval);
+        return rval_reg;
+    } break;
+
+    case NT_MOD: {
+        /* R[%edx] <- R[%edx]:R[%eax] mod S */
+
+        /* eax is currently not in the scratch registers,
+           so we don't care about it */
+
+        bool edx_in_use = false;
+        uint register_id;
+
+        if (registers_in_use[EDX]) {
+            edx_in_use = true;
+            register_id = register_reserve();
+            printf("\tmovl\t%%edx, %%%s\n",
+                   scratch_4b_registers[register_id]);
+        }
+
+        storage_t rval_init = codegen(n->rval);
+        storage_t lval = codegen(n->lval);
+        assert(lval.type != ST_NONE && rval_init.type != ST_NONE);
+
+        storage_t rval_reg = storage_move_to_register(rval_init);
+
+        printf("\txorl\t%%edx, %%edx\n");
+
+        printf("\tmovl\t");
+        storage_unwrap(lval);
+        printf(", %%eax\n");
+
+        printf("\tidiv\t");
+        storage_unwrap(rval_reg);
+        printf("\n");
+
+        printf("\tmovl\t%%edx, ");
         storage_unwrap(rval_reg);
         printf("\n");
 

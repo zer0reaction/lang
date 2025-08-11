@@ -1,0 +1,23 @@
+fn print_int(n) {
+  if n < 10 {
+    let c := n + '0';
+    putchar(c);
+  } else {
+    let temp := n / 10;
+    print_int(temp);
+    temp := n % 10 + '0';
+    putchar(temp);
+  }
+}
+
+fn main() {
+  let i := 1;
+
+  while i <= 1000 * 1000 {
+    print_int(i);
+    putchar('\n');
+    i := i + 1;
+  }
+}
+
+main();
