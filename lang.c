@@ -82,6 +82,7 @@ typedef enum {
     TT_CMP_GREATER_OR_EQ,
     TT_PLUS,
     TT_MINUS,
+    TT_STAR,
     TT_LET,
     TT_WHILE,
     TT_IF,
@@ -123,6 +124,7 @@ static token_string_t token_strings[] = {
     { .s = "fn",    .t = TT_FN                },
     { .s = "+",     .t = TT_PLUS              },
     { .s = "-",     .t = TT_MINUS             },
+    { .s = "*",     .t = TT_STAR              },
     { .s = "<",     .t = TT_CMP_LESS          },
     { .s = ">",     .t = TT_CMP_GREATER       },
     { .s = "(",     .t = TT_ROUND_OPEN        },
@@ -158,6 +160,7 @@ typedef enum {
     NT_CHAR,
     NT_SUM,
     NT_SUB,
+    NT_MULT,
     NT_COUNT
 } nt_t;
 
@@ -273,10 +276,11 @@ typedef struct {
 /* -------------------------------------------------------------------------------- */
 
 typedef enum {
-    OP_PRIORITY_UNARY          = 0,
-    OP_PRIORITY_BINARY_ADD_SUB = 1,
-    OP_PRIORITY_BINARY_COMP    = 2,
-    OP_PRIORITY_BINARY_ASSIGN  = 3
+    OP_PRIORITY_UNARY               = 0,
+    OP_PRIORITY_BINARY_MULT_DIV_REM = 1,
+    OP_PRIORITY_BINARY_ADD_SUB      = 2,
+    OP_PRIORITY_BINARY_COMP         = 3,
+    OP_PRIORITY_BINARY_ASSIGN       = 4
 } op_priority_t;
 
 /* -------------------------------------------------------------------------------- */
@@ -344,7 +348,7 @@ token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 24);
+    assert(TT_COUNT == 25);
 
     while (i < len) {
         /* blank characters */
@@ -447,16 +451,20 @@ token_t *tokenize(const char *s, u64 len) {
 
 op_priority_t operator_get_priority(token_t t) {
     switch (t.type) {
-        /* 0) left to right */
+        /* left to right */
     case TT_LET:
         return OP_PRIORITY_UNARY;
 
-        /* 1) left to right */
+        /* left to right */
+    case TT_STAR:
+        return OP_PRIORITY_BINARY_MULT_DIV_REM;
+
+        /* left to right */
     case TT_PLUS:
     case TT_MINUS:
         return OP_PRIORITY_BINARY_ADD_SUB;
 
-        /* 2) left to right */
+        /* left to right */
     case TT_CMP_LESS:
     case TT_CMP_GREATER:
     case TT_CMP_LESS_OR_EQ:
@@ -465,7 +473,7 @@ op_priority_t operator_get_priority(token_t t) {
     case TT_CMP_NEQ:
         return OP_PRIORITY_BINARY_COMP;
 
-        /* 3) right to left */
+        /* right to left */
     case TT_COLUMN_EQUAL:
         return OP_PRIORITY_BINARY_ASSIGN;
 
@@ -487,6 +495,9 @@ uint token_length_to_type(const token_t *ts, uint start, tt_t type) {
 }
 
 node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
+    assert(TT_COUNT == 25);
+    assert(NT_COUNT == 20);
+
     if (len == 1) {
         node_t *n = arena_alloc_initz(a, sizeof *n);
 
@@ -627,6 +638,10 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
             n->type = NT_SUB;
             break;
 
+        case TT_STAR:
+            n->type = NT_MULT;
+            break;
+
         default:
             assert(0 && "invalid binary operation type");
         }
@@ -639,8 +654,8 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
 }
 
 node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
-    assert(TT_COUNT == 24);
-    assert(NT_COUNT == 19);
+    assert(TT_COUNT == 25);
+    assert(NT_COUNT == 20);
 
     assert(*eaten < arrlenu(ts));
 
@@ -748,7 +763,7 @@ node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
 }
 
 void pass_set_scope_ids(node_t *n, u32 *scope_count) {
-    assert(NT_COUNT == 19);
+    assert(NT_COUNT == 20);
 
     if (!n) return;
 
@@ -780,7 +795,7 @@ void pass_set_scope_ids(node_t *n, u32 *scope_count) {
 }
 
 void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, arena_t *a) {
-    assert(NT_COUNT == 19);
+    assert(NT_COUNT == 20);
 
     if (!n) return;
 
@@ -840,6 +855,7 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
 
     case NT_SUM:
     case NT_SUB:
+    case NT_MULT:
     case NT_CMP_EQ:
     case NT_CMP_NEQ:
     case NT_CMP_LESS:
@@ -1020,7 +1036,7 @@ void storage_free_intermediate(storage_t st) {
 storage_t codegen(node_t *n) {
     static uint local_label_count = 0;
 
-    assert(NT_COUNT == 19);
+    assert(NT_COUNT == 20);
 
     if (n->is_generated) {
         return (storage_t){ .type = ST_NONE };
@@ -1217,6 +1233,23 @@ storage_t codegen(node_t *n) {
         storage_t lval_reg = storage_move_to_register(lval_init);
 
         printf("\tsubl\t");
+        storage_unwrap(rval);
+        printf(", ");
+        storage_unwrap(lval_reg);
+        printf("\n");
+
+        storage_free_intermediate(rval);
+        return lval_reg;
+    } break;
+
+    case NT_MULT: {
+        storage_t rval = codegen(n->rval);
+        storage_t lval_init = codegen(n->lval);
+        assert(lval_init.type != ST_NONE && rval.type != ST_NONE);
+
+        storage_t lval_reg = storage_move_to_register(lval_init);
+
+        printf("\timull\t");
         storage_unwrap(rval);
         printf(", ");
         storage_unwrap(lval_reg);
