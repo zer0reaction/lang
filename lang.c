@@ -19,6 +19,8 @@
 #define IDENT_NAME_MAX_LEN 32
 #define ARENA_REGION_DEFAULT_CAPACITY (2 * 1024)
 
+#define TODO() assert(0 && "not implemented")
+
 #define ABSOLUTE(a) ((a) >= 0 ? (a) : -(a))
 
 #define LIST_APPEND_ITEM(head, tail, item)      \
@@ -35,12 +37,50 @@
 /* Global immutable variables                                                       */
 /* -------------------------------------------------------------------------------- */
 
+typedef enum {
+    EDI  = 0,
+    ESI  = 1,
+    EDX  = 2,
+    ECX  = 3,
+    R8D  = 4,
+    R9D  = 5,
+    R10D = 6,
+    R11D = 7
+} scratch_4b_register_ids;
+
 static const char *scratch_4b_registers[] = {
-    "edi", "esi", "edx", "ecx", "r8d", "r9d", "r10d", "r11d"
+    [EDI]  = "edi",
+    [ESI]  = "esi",
+    [EDX]  = "edx",
+    [ECX]  = "ecx",
+    [R8D]  = "r8d",
+    [R9D]  = "r9d",
+    [R10D] = "r10d",
+    [R11D] = "r11d"
 };
+
+typedef enum {
+    DIL  = 0,
+    SIL  = 1,
+    DL   = 2,
+    CL   = 3,
+    R8B  = 4,
+    R9B  = 5,
+    R10B = 6,
+    R11B = 7
+} scratch_1b_register_ids;
+
 static const char *scratch_1b_registers[] = {
-    "dil", "sil", "dl", "cl", "r8b", "r9b", "r10b", "r11b"
+    [DIL]  = "dil",
+    [SIL]  = "sil",
+    [DL]   = "dl",
+    [CL]   = "cl",
+    [R8B]  = "r8b",
+    [R9B]  = "r9b",
+    [R10B] = "r10b",
+    [R11B] = "r11b"
 };
+
 #define SCRATCH_REGISTERS_COUNT (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
 
 static const char *argument_registers[] = {
@@ -83,6 +123,7 @@ typedef enum {
     TT_PLUS,
     TT_MINUS,
     TT_STAR,
+    TT_SLASH,
     TT_LET,
     TT_WHILE,
     TT_IF,
@@ -125,6 +166,7 @@ static token_string_t token_strings[] = {
     { .s = "+",     .t = TT_PLUS              },
     { .s = "-",     .t = TT_MINUS             },
     { .s = "*",     .t = TT_STAR              },
+    { .s = "/",     .t = TT_SLASH             },
     { .s = "<",     .t = TT_CMP_LESS          },
     { .s = ">",     .t = TT_CMP_GREATER       },
     { .s = "(",     .t = TT_ROUND_OPEN        },
@@ -161,6 +203,7 @@ typedef enum {
     NT_SUM,
     NT_SUB,
     NT_MULT,
+    NT_DIV,
     NT_COUNT
 } nt_t;
 
@@ -348,7 +391,7 @@ token_t *tokenize(const char *s, u64 len) {
     u64 i = 0;
     token_t *ts = NULL;
 
-    assert(TT_COUNT == 25);
+    assert(TT_COUNT == 26);
 
     while (i < len) {
         /* blank characters */
@@ -457,6 +500,7 @@ op_priority_t operator_get_priority(token_t t) {
 
         /* left to right */
     case TT_STAR:
+    case TT_SLASH:
         return OP_PRIORITY_BINARY_MULT_DIV_REM;
 
         /* left to right */
@@ -495,8 +539,8 @@ uint token_length_to_type(const token_t *ts, uint start, tt_t type) {
 }
 
 node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
-    assert(TT_COUNT == 25);
-    assert(NT_COUNT == 20);
+    assert(TT_COUNT == 26);
+    assert(NT_COUNT == 21);
 
     if (len == 1) {
         node_t *n = arena_alloc_initz(a, sizeof *n);
@@ -642,6 +686,10 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
             n->type = NT_MULT;
             break;
 
+        case TT_SLASH:
+            n->type = NT_DIV;
+            break;
+
         default:
             assert(0 && "invalid binary operation type");
         }
@@ -654,8 +702,8 @@ node_t *parse_statement(const token_t *ts, uint start, uint len, arena_t *a) {
 }
 
 node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
-    assert(TT_COUNT == 25);
-    assert(NT_COUNT == 20);
+    assert(TT_COUNT == 26);
+    assert(NT_COUNT == 21);
 
     assert(*eaten < arrlenu(ts));
 
@@ -763,7 +811,7 @@ node_t *parse(const token_t *ts, u32 *eaten, arena_t *a) {
 }
 
 void pass_set_scope_ids(node_t *n, u32 *scope_count) {
-    assert(NT_COUNT == 20);
+    assert(NT_COUNT == 21);
 
     if (!n) return;
 
@@ -795,7 +843,7 @@ void pass_set_scope_ids(node_t *n, u32 *scope_count) {
 }
 
 void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, arena_t *a) {
-    assert(NT_COUNT == 20);
+    assert(NT_COUNT == 21);
 
     if (!n) return;
 
@@ -856,6 +904,7 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
     case NT_SUM:
     case NT_SUB:
     case NT_MULT:
+    case NT_DIV:
     case NT_CMP_EQ:
     case NT_CMP_NEQ:
     case NT_CMP_LESS:
@@ -1036,7 +1085,7 @@ void storage_free_intermediate(storage_t st) {
 storage_t codegen(node_t *n) {
     static uint local_label_count = 0;
 
-    assert(NT_COUNT == 20);
+    assert(NT_COUNT == 21);
 
     if (n->is_generated) {
         return (storage_t){ .type = ST_NONE };
@@ -1257,6 +1306,52 @@ storage_t codegen(node_t *n) {
 
         storage_free_intermediate(rval);
         return lval_reg;
+    } break;
+
+    case NT_DIV: {
+        /* R[%eax] <- R[%edx]:R[%eax] / S */
+
+        /* eax is currently not in the scratch registers,
+           so we don't care about it */
+
+        bool edx_in_use = false;
+        uint register_id;
+
+        if (registers_in_use[EDX]) {
+            edx_in_use = true;
+            register_id = register_reserve();
+            printf("\tmovl\t%%edx, %%%s\n",
+                   scratch_4b_registers[register_id]);
+        }
+
+        storage_t rval_init = codegen(n->rval);
+        storage_t lval = codegen(n->lval);
+        assert(lval.type != ST_NONE && rval_init.type != ST_NONE);
+
+        storage_t rval_reg = storage_move_to_register(rval_init);
+
+        printf("\txorl\t%%edx, %%edx\n");
+
+        printf("\tmovl\t");
+        storage_unwrap(lval);
+        printf("\t, %%eax\n");
+
+        printf("\tidiv\t");
+        storage_unwrap(rval_reg);
+        printf("\n");
+
+        printf("\tmovl\t%%eax, ");
+        storage_unwrap(rval_reg);
+        printf("\n");
+
+        if (edx_in_use) {
+            printf("\tmovl\t%%%s, %%edx\n",
+                   scratch_4b_registers[register_id]);
+            register_free(register_id);
+        }
+
+        storage_free_intermediate(lval);
+        return rval_reg;
     } break;
 
     case NT_FUNC_CALL: {
