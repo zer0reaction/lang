@@ -37,16 +37,14 @@
 /* Global immutable variables                                                       */
 /* -------------------------------------------------------------------------------- */
 
-typedef enum {
-    EDI  = 0,
-    ESI  = 1,
-    EDX  = 2,
-    ECX  = 3,
-    R8D  = 4,
-    R9D  = 5,
-    R10D = 6,
-    R11D = 7
-} scratch_4b_register_ids;
+#define EDI  0
+#define ESI  1
+#define EDX  2
+#define ECX  3
+#define R8D  4
+#define R9D  5
+#define R10D 6
+#define R11D 7
 
 static const char *scratch_4b_registers[] = {
     [EDI]  = "edi",
@@ -59,16 +57,14 @@ static const char *scratch_4b_registers[] = {
     [R11D] = "r11d"
 };
 
-typedef enum {
-    DIL  = 0,
-    SIL  = 1,
-    DL   = 2,
-    CL   = 3,
-    R8B  = 4,
-    R9B  = 5,
-    R10B = 6,
-    R11B = 7
-} scratch_1b_register_ids;
+#define DIL  0
+#define SIL  1
+#define DL   2
+#define CL   3
+#define R8B  4
+#define R9B  5
+#define R10B 6
+#define R11B 7
 
 static const char *scratch_1b_registers[] = {
     [DIL]  = "dil",
