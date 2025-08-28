@@ -318,16 +318,14 @@ typedef struct {
 } arena_t;
 
 /* -------------------------------------------------------------------------- */
-/* Operator priority type                                                     */
+/* Operator priority                                                          */
 /* -------------------------------------------------------------------------- */
 
-typedef enum {
-  OP_PRIORITY_UNARY               = 0,
-  OP_PRIORITY_BINARY_MULT_DIV_REM = 1,
-  OP_PRIORITY_BINARY_ADD_SUB      = 2,
-  OP_PRIORITY_BINARY_COMP         = 3,
-  OP_PRIORITY_BINARY_ASSIGN       = 4
-} op_priority_t;
+#define OP_PRIORITY_UNARY               0
+#define OP_PRIORITY_BINARY_MULT_DIV_REM 1
+#define OP_PRIORITY_BINARY_ADD_SUB      2
+#define OP_PRIORITY_BINARY_COMP         3
+#define OP_PRIORITY_BINARY_ASSIGN       4
 
 /* -------------------------------------------------------------------------- */
 /* Global mutable variables                                                   */
@@ -499,7 +497,7 @@ token_t *tokenize(const char *s, u64 len) {
   return ts;
 }
 
-op_priority_t operator_get_priority(token_t t) {
+int operator_get_priority(token_t t) {
   switch (t.type) {
     /* left to right */
     case TT_LET:
