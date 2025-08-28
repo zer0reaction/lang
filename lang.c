@@ -4,16 +4,16 @@
 #include <assert.h>
 #include <stdint.h>
 
-/* -------------------------------------------------------------------------------- */
-/* External libs                                                                    */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* External libs                                                              */
+/* -------------------------------------------------------------------------- */
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
-/* -------------------------------------------------------------------------------- */
-/* Preprocessor                                                                     */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Preprocessor                                                               */
+/* -------------------------------------------------------------------------- */
 
 #define SCOPE_IDS_BUF_SIZE 32
 #define IDENT_NAME_MAX_LEN 32
@@ -33,9 +33,9 @@
         }                                       \
     } while (0)
 
-/* -------------------------------------------------------------------------------- */
-/* Global immutable variables                                                       */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Global immutable variables                                                 */
+/* -------------------------------------------------------------------------- */
 
 #define EDI  0
 #define ESI  1
@@ -77,16 +77,19 @@ static const char *scratch_1b_registers[] = {
     [R11B] = "r11b"
 };
 
-#define SCRATCH_REGISTERS_COUNT (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
+#define SCRATCH_REGISTERS_COUNT                                     \
+    (sizeof(scratch_4b_registers) / sizeof(*scratch_4b_registers))
 
 static const char *argument_registers[] = {
     "edi", "esi", "edx", "ecx", "r8d", "r9d"
 };
-#define ARGUMENT_REGISTERS_COUNT (sizeof(argument_registers) / sizeof(*argument_registers))
 
-/* -------------------------------------------------------------------------------- */
-/* Integer type defenitions                                                         */
-/* -------------------------------------------------------------------------------- */
+#define ARGUMENT_REGISTERS_COUNT                                \
+    (sizeof(argument_registers) / sizeof(*argument_registers))
+
+/* -------------------------------------------------------------------------- */
+/* Integer type defenitions                                                   */
+/* -------------------------------------------------------------------------- */
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -100,9 +103,9 @@ typedef int64_t s64;
 
 typedef unsigned uint;
 
-/* -------------------------------------------------------------------------------- */
-/* Token type                                                                       */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Token type                                                                 */
+/* -------------------------------------------------------------------------- */
 
 typedef enum {
     TT_EMPTY = 0,
@@ -176,9 +179,9 @@ static token_string_t token_strings[] = {
 };
 #define TOKEN_STRINGS_COUNT (sizeof(token_strings) / sizeof(*token_strings))
 
-/* -------------------------------------------------------------------------------- */
-/* Node type                                                                        */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Node type                                                                  */
+/* -------------------------------------------------------------------------- */
 
 typedef enum {
     NT_EMPTY = 0,
@@ -251,14 +254,15 @@ struct node_t {
             node_t *args[ARGUMENT_REGISTERS_COUNT];
             node_t *func_body;
             u8      args_count;
-            u8      allign_sub; /* positive value, subtracted from rsp before call */
+            u8      allign_sub; /* positive value,
+                                   subtracted from rsp before call */
         };
     };
 };
 
-/* -------------------------------------------------------------------------------- */
-/* Symbol type                                                                      */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Symbol type                                                                */
+/* -------------------------------------------------------------------------- */
 
 typedef enum {
     SYMBOL_TYPE_VARIABLE,
@@ -273,9 +277,9 @@ typedef struct {
     node_t        *node;
 } symbol_t;
 
-/* -------------------------------------------------------------------------------- */
-/* Storage type                                                                     */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Storage type                                                               */
+/* -------------------------------------------------------------------------- */
 
 typedef enum {
     ST_NONE,
@@ -295,9 +299,9 @@ typedef struct {
     };
 } storage_t;
 
-/* -------------------------------------------------------------------------------- */
-/* Arena type                                                                       */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Arena type                                                                 */
+/* -------------------------------------------------------------------------- */
 
 typedef struct arena_region_t arena_region_t;
 
@@ -313,9 +317,9 @@ typedef struct {
     arena_region_t *tail;
 } arena_t;
 
-/* -------------------------------------------------------------------------------- */
-/* Operator priority type                                                           */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Operator priority type                                                     */
+/* -------------------------------------------------------------------------- */
 
 typedef enum {
     OP_PRIORITY_UNARY               = 0,
@@ -325,16 +329,16 @@ typedef enum {
     OP_PRIORITY_BINARY_ASSIGN       = 4
 } op_priority_t;
 
-/* -------------------------------------------------------------------------------- */
-/* Global mutable variables                                                         */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Global mutable variables                                                   */
+/* -------------------------------------------------------------------------- */
 
 static symbol_t *table = NULL;
 static bool registers_in_use[SCRATCH_REGISTERS_COUNT] = { 0 };
 
-/* -------------------------------------------------------------------------------- */
-/* Code                                                                             */
-/* -------------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
+/* Code                                                                       */
+/* -------------------------------------------------------------------------- */
 
 #include "testing.c"
 
@@ -403,7 +407,9 @@ token_t *tokenize(const char *s, u64 len) {
         bool match = false;
         for (u64 j = 0; j < TOKEN_STRINGS_COUNT; j++) {
             token_string_t current = token_strings[j];
-            if (len - i >= strlen(current.s) && strncmp(&s[i], current.s, strlen(current.s)) == 0) {
+            if (len - i >= strlen(current.s) &&
+                strncmp(&s[i], current.s, strlen(current.s)) == 0)
+            {
                 token_t t = {0};
                 t.type = current.t;
                 arrput(ts, t);
@@ -476,7 +482,9 @@ token_t *tokenize(const char *s, u64 len) {
             t.type = TT_IDENT;
 
             u32 name_len = 0;
-            while (len - i > 0 && ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_')) {
+            while (len - i > 0 &&
+                   ((s[i] >= 'a' && s[i] <= 'z') || s[i] == '_'))
+            {
                 assert(name_len < IDENT_NAME_MAX_LEN);
                 t.ident_name[name_len++] = s[i++];
             }
@@ -846,7 +854,12 @@ void pass_set_scope_ids(node_t *n, u32 *scope_count) {
     pass_set_scope_ids(n->next, scope_count);
 }
 
-void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u32 size, arena_t *a) {
+void pass_populate_table(node_t    *n,
+                         s32       *stack_offset,
+                         const u32  scope_ids[],
+                         u32        size,
+                         arena_t   *a)
+{
     assert(NT_COUNT == 22);
 
     if (!n) return;
@@ -858,7 +871,9 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
         u32 current_scope_id = scope_ids[size - 1];
 
         for (u64 i = 0; i < arrlenu(table); i++) {
-            if (table[i].scope_id == current_scope_id && n->var_name == table[i].ident_name) {
+            if (table[i].scope_id == current_scope_id &&
+                n->var_name == table[i].ident_name)
+            {
                 in_current_scope = true;
                 break;
             }
@@ -902,7 +917,11 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
             new_scope_ids[i] = scope_ids[i];
         }
         new_scope_ids[size] = n->scope_id;
-        pass_populate_table(n->scope_start, stack_offset, new_scope_ids, size + 1, a);
+        pass_populate_table(n->scope_start,
+                            stack_offset,
+                            new_scope_ids,
+                            size + 1,
+                            a);
     } break;
 
     case NT_SUM:
@@ -934,7 +953,9 @@ void pass_populate_table(node_t *n, s32 *stack_offset, const u32 scope_ids[], u3
 
     case NT_FUNC_CALL: {
         /* TODO: refactor, lame */
-        n->allign_sub = ABSOLUTE(*stack_offset) + (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+        n->allign_sub = ABSOLUTE(*stack_offset) +
+            (16 - ABSOLUTE(*stack_offset) % 16) % 16;
+
         for (u64 i = 0; i < n->args_count; i++) {
             pass_populate_table(n->args[i], stack_offset, scope_ids, size, a);
         }
@@ -1425,7 +1446,8 @@ storage_t codegen(node_t *n) {
         }
         printf("\tcall\t%s\n", n->func_name);
         if (n->allign_sub > 0) {
-            printf("\taddq\t$%d, %%rsp\n", n->allign_sub); /* TODO: refactor, lame */
+            /* TODO: refactor, lame */
+            printf("\taddq\t$%d, %%rsp\n", n->allign_sub);
         }
 
         /* TODO: currently recursive function calls can modify
@@ -1439,8 +1461,9 @@ storage_t codegen(node_t *n) {
     } break;
 
     case NT_FUNC_DECL: {
-        /* variable nodes in the args are just names, there are no ids assigned to them */
-        /* variable declaration nodes are pushed at the start of the function body (scope) */
+        /* Variable nodes in the args are just names, there are no ids
+           assigned to them. Variable declaration nodes are pushed at
+           the start of the function body (scope) */
 
         printf("%s:\n", n->func_name);
         printf("\tpushq\t%%rbp\n");
